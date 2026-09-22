@@ -16,6 +16,9 @@ struct DrawerShell: View {
     @State private var sel: Sel = .channel(0, 1)
     @State private var open = true
     @State private var drag: CGFloat = 0
+    /// Kept true for the whole closing animation. The drawer has to stay mounted while
+    /// the page slides back over it, or it blinks out from under a page still in motion.
+    @State private var drawerMounted = true
     @State private var path: [Topic] = []
     @State private var icons: [ChannelGroup.ID: Data] = [:]
     @State private var iconTarget: ChannelGroup.ID?
@@ -29,10 +32,20 @@ struct DrawerShell: View {
         min(max((open ? drawerW : 0) + drag, 0), drawerW)
     }
 
+    private func setOpen(_ value: Bool) {
+        if value { drawerMounted = true }
+        withAnimation(.snappy, completionCriteria: .removed) {
+            open = value
+            drag = 0
+        } completion: {
+            if !open { drawerMounted = false }
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .leading) {
             Color(.systemBackground).ignoresSafeArea()
-            if offset > 0 { drawer }
+            if drawerMounted { drawer }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The card is drawn behind the content rather than clipping it. Clipping
@@ -48,7 +61,7 @@ struct DrawerShell: View {
                 .overlay {
                     if offset > drawerW * 0.4 {
                         Color.black.opacity(0.001)
-                            .onTapGesture { withAnimation(.snappy) { open = false } }
+                            .onTapGesture { setOpen(false) }
                             .offset(x: offset)
                     }
                 }
@@ -56,14 +69,12 @@ struct DrawerShell: View {
                     DragGesture(minimumDistance: 12)
                         .onChanged { v in
                             guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                            if v.translation.width > 0 { drawerMounted = true }
                             drag = v.translation.width
                         }
                         .onEnded { v in
                             let projected = offset + v.predictedEndTranslation.width * 0.4
-                            withAnimation(.snappy) {
-                                open = projected > drawerW / 2
-                                drag = 0
-                            }
+                            setOpen(projected > drawerW / 2)
                         }
                 )
         }
@@ -224,7 +235,7 @@ struct DrawerShell: View {
         return Button {
             sel = .channel(gi, ci)
             path = []
-            withAnimation(.snappy) { open = false }
+            setOpen(false)
         } label: {
             HStack(spacing: 8) {
                 ChannelIcon(mode: c.mode, restricted: c.restricted)
@@ -249,7 +260,7 @@ struct DrawerShell: View {
         return Button {
             sel = .dm(i)
             path = []
-            withAnimation(.snappy) { open = false }
+            setOpen(false)
         } label: {
             HStack(spacing: 8) {
                 Avatar(name: d.name, size: 28)
@@ -286,7 +297,7 @@ struct DrawerShell: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        withAnimation(.snappy) { open.toggle() }
+                        setOpen(!open)
                     } label: {
                         Image(systemName: "line.3.horizontal")
                     }
