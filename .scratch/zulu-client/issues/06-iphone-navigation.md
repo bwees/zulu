@@ -28,3 +28,14 @@ Settled with it:
 Channel row iconography, decided alongside: `bubble.left.and.text.bubble.right` for forum channels, `number` for chat channels, with a `lock.fill` subicon for restricted channels.
 
 Prototype: `prototypes/nav-shell` — run `prototypes/nav-shell/run.sh`.
+
+## Follow-up: the drawer is hand-rolled
+
+Surveyed the SwiftUI drawer package landscape before committing to custom code. Nothing credible exists: the popular results — `LGSideMenuController`, `kukushi/SideMenu`, `InteractiveSideMenu`, `AKSideMenu` — are all UIKit view controllers, and `Rideau`, `DrawerView`, and `UltraDrawerView` are bottom sheets, not side drawers. The only SwiftUI-native option found has two stars. A wrapper would also have to be taught Liquid Glass and iOS 27, which none of them know.
+
+The drawer stays hand-rolled: roughly fifty lines of `ZStack`, offset, and a drag gesture.
+
+Two layout rules came out of making it behave:
+
+- **The message page draws its card as a background, never as a clip.** Clipping the content shaves the toolbar's glass controls against the rounded corner. The card is a `RoundedRectangle` behind the content instead.
+- **That card ignores safe areas**, so the page runs the full height of the window under the status bar and home indicator rather than sitting in a letterboxed inset.

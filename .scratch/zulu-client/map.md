@@ -61,6 +61,3 @@ A handoff-ready implementation spec for **Zulu**: a SwiftUI client for iOS and m
 - **Go service operations** — deployment target, monitoring, backups, scaling past one box. Its build and test pipeline is in scope; how it runs in production is not.
 - **Android and web clients** — Apple platforms only.
 
-## Known constraints
-
-- **CI cannot validate against the iOS 27 SDK.** GitHub-hosted macOS runners ship no Xcode newer than 26.x, so CI builds a deployment-target-27 project against a 26.x SDK. Type and syntax errors are caught; genuinely iOS 27-only API will fail on CI while succeeding locally. Revisit when GitHub ships Xcode 27, or move the Apple job to a self-hosted runner. This feeds [Release pipeline to App Store Connect](issues/21-release-pipeline.md).
