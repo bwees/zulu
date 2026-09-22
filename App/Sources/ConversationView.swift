@@ -129,6 +129,13 @@ struct ConversationView: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: atBottom)
+        // The identity anchor pins whatever is on screen, which is right while
+        // reading back but wrong at the live edge: a new message would arrive below
+        // the fold. Following it only while already at the bottom keeps both.
+        .onChange(of: loader.messages.last?.id) { _, newest in
+            guard atBottom, let newest else { return }
+            withAnimation(.easeOut(duration: 0.2)) { anchoredMessageID = newest }
+        }
     }
 
     private var title: String {
