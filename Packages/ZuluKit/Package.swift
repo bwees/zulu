@@ -19,5 +19,6 @@ let package = Package(
             .product(name: "GRDB", package: "GRDB.swift"),
         ]),
         .target(name: "ZuluSync", dependencies: ["ZulipAPI", "ZuluStore"]),
+        .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore"]),
     ]
 )

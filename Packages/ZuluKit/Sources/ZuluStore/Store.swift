@@ -6,11 +6,16 @@ import ZulipAPI
 public final class ZuluStore: Sendable {
     public let writer: any DatabaseWriter
 
-    public init(path: String?) throws {
+    /// Pass `nil` for an in-memory store.
+    ///
+    /// Takes a URL rather than a path because the app's container lives under
+    /// "Application Support", and `URL.path()` percent-encodes that space into
+    /// something SQLite cannot open.
+    public init(url: URL?) throws {
         var configuration = Configuration()
         configuration.foreignKeysEnabled = true
-        if let path {
-            writer = try DatabasePool(path: path, configuration: configuration)
+        if let url {
+            writer = try DatabasePool(path: url.path(percentEncoded: false), configuration: configuration)
         } else {
             writer = try DatabaseQueue(configuration: configuration)
         }

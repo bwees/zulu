@@ -54,7 +54,7 @@ final class AppModel {
 
     private func activate(_ account: ZulipAccount) async {
         do {
-            let store = try ZuluStore(path: try ZuluStore.defaultURL().path())
+            let store = try ZuluStore(url: try ZuluStore.defaultURL())
             let client = ZulipClient(account: account)
             let sync = SyncEngine(client: client, store: store, selfUserID: account.userID)
 

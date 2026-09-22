@@ -26,9 +26,9 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Build ZuluKit
+      - name: Build and test ZuluKit
         working-directory: Packages/ZuluKit
-        run: swift build
+        run: swift test
 
       - name: Build app
         working-directory: App
