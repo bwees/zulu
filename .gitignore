@@ -1,0 +1,15 @@
+.DS_Store
+
+# xcodegen generates these from project.yml
+*.xcodeproj
+
+# build output
+build/
+DerivedData/
+.build/
+xcuserdata/
+*.xcuserstate
+
+# go
+/bin/
+*.db
