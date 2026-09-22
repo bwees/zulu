@@ -73,3 +73,7 @@ is worth notifying about.
 - **Forum-vs-chat detection is a placeholder.** A channel renders as a forum when it has more than one topic. [Forum-vs-chat auto-detection](issues/09-channel-mode-detection.md) is where the real rule gets decided.
 - **No local echo on send.** A sent message appears when the event queue returns it. `queue_id` + `local_id` exist for optimistic echo and are unused.
 - **Topics are fetched per channel in a loop** after each register, because there is no bulk endpoint. Fine at small channel counts, rude at large ones.
+
+### Paid back
+
+- **Message rendering is now native.** `ZuluMarkup` parses Zulip's `rendered_content` into blocks and the app lays them out: paragraphs with inline styling, quotes, code blocks, lists, uploaded images, realm custom emoji, and mentions. The `NSAttributedString` HTML importer is gone. 18 tests cover it, several written from HTML captured off zulip.futo.org.

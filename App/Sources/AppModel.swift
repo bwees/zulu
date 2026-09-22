@@ -37,7 +37,7 @@ final class AppModel {
     var isWorking = false
 
     fileprivate var store: ZuluStore?
-    private var client: ZulipClient?
+    fileprivate var client: ZulipClient?
     private var sync: SyncEngine?
     private var observers: [AnyDatabaseCancellable] = []
 
@@ -61,6 +61,7 @@ final class AppModel {
             self.account = account
             self.store = store
             self.client = client
+            RealmContext.realmURL = account.realmURL
             self.sync = sync
 
             observe(store)
@@ -278,4 +279,30 @@ enum WebAuthSession {
 extension AppModel {
     /// Views observe the database directly; they still never write to it.
     var storeForReading: ZuluStore? { store }
+}
+
+// MARK: - Media
+
+extension AppModel {
+    /// Fetches an upload or proxied external image. Realm-relative paths go through the
+    /// authenticated client; anything already absolute is fetched plainly, so the API key
+    /// never leaves the realm's origin.
+    func imageData(at path: String) async -> Data? {
+        if let cached = await Self.imageCache.value(for: path) { return cached }
+
+        let data: Data?
+        if path.hasPrefix("/") {
+            data = try? await client?.media(at: path)
+        } else if let url = URL(string: path), url.scheme == "http" || url.scheme == "https" {
+            data = try? await URLSession.shared.data(from: url).0
+        } else {
+            data = nil
+        }
+
+        guard let data, !data.isEmpty else { return nil }
+        await Self.imageCache.insert(data, for: path)
+        return data
+    }
+
+    private static let imageCache = ImageCache()
 }

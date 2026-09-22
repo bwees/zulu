@@ -218,17 +218,6 @@ struct ShellView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { setOpen(!open) } label: { Image(systemName: "line.3.horizontal") }
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button("Refresh topics", systemImage: "arrow.clockwise") {
-                                Task { await model.refreshTopics() }
-                            }
-                            Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right",
-                                   role: .destructive) {
-                                Task { await model.signOut() }
-                            }
-                        } label: { Image(systemName: "ellipsis") }
-                    }
                 }
         }
     }

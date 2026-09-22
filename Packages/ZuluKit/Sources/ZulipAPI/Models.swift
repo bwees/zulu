@@ -144,3 +144,8 @@ public struct NarrowFilter: Encodable, Sendable, Equatable {
     public static func topic(_ name: String) -> NarrowFilter { .init("topic", .text(name)) }
     public static func dm(_ userIDs: [Int]) -> NarrowFilter { .init("dm", .numbers(userIDs)) }
 }
+
+extension NarrowFilter {
+    /// `is:dm` replaced `is:private` at feature level 177.
+    public static let directMessages = NarrowFilter("is", .text("dm"))
+}

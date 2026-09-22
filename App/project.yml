@@ -19,6 +19,8 @@ targets:
         product: ZuluStore
       - package: ZuluKit
         product: ZuluSync
+      - package: ZuluKit
+        product: ZuluMarkup
     info:
       path: Zulu-Info.plist
       properties:

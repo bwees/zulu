@@ -17,12 +17,25 @@ struct ConversationView: View {
     @State private var draft = ""
     @State private var sendError: String?
     @State private var sending = false
+    @State private var showEmoji = false
+    @State private var atBottom = true
+    /// Snapshotted when the conversation opens, so the divider does not vanish the
+    /// moment the messages behind it are marked read.
+    @State private var firstUnreadID: Int?
+
+    /// Five minutes, matching what Discord and Slack settle on.
+    private static let groupingWindow = 5 * 60
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(grouped, id: \.message.id) { entry in
+                        if entry.message.id == firstUnreadID {
+                            UnreadDivider()
+                                .padding(.top, 10)
+                                .id(UnreadDivider.anchor)
+                        }
                         MessageRow(message: entry.message, startsGroup: entry.startsGroup)
                             .padding(.top, entry.startsGroup ? 14 : 2)
                             .id(entry.message.id)
@@ -30,10 +43,38 @@ struct ConversationView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+                .background(DisablesScrollToTop().frame(width: 0, height: 0))
             }
             .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .defaultScrollAnchor(.bottom)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let distance = geometry.contentSize.height
+                    - (geometry.contentOffset.y + geometry.containerSize.height)
+                return distance < 120
+            } action: { _, isNearBottom in
+                atBottom = isNearBottom
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !atBottom {
+                    Button {
+                        withAnimation(.snappy) {
+                            proxy.scrollTo(messages.last?.id, anchor: .bottom)
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.2), value: atBottom)
             .onChange(of: messages.last?.id) { _, last in
-                guard let last else { return }
+                guard let last, atBottom else { return }
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last, anchor: .bottom) }
             }
         }
@@ -50,6 +91,9 @@ struct ConversationView: View {
                 }
             }
         }
+        .sheet(isPresented: $showEmoji) {
+            EmojiPicker { draft.append($0) }
+        }
         .task(id: source) { await load() }
     }
 
@@ -60,15 +104,12 @@ struct ConversationView: View {
         var previous: MessageRecord?
         return messages.map { message in
             defer { previous = message }
-            guard let previous else { return (message, true) }
+            guard let previous, message.id != firstUnreadID else { return (message, true) }
             let sameSender = previous.senderID == message.senderID
             let closeInTime = message.timestamp - previous.timestamp < Self.groupingWindow
             return (message, !(sameSender && closeInTime))
         }
     }
-
-    /// Five minutes, matching what Discord and Slack settle on.
-    private static let groupingWindow = 5 * 60
 
     private var title: String {
         switch source {
@@ -82,25 +123,43 @@ struct ConversationView: View {
             if let sendError {
                 Text(sendError).font(.caption).foregroundStyle(.red)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                circleButton("face.smiling") { showEmoji = true }
+
                 TextField(placeholder, text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 9)
                     .glassEffect(.regular, in: .capsule)
+
                 Button {
                     Task { await send() }
                 } label: {
-                    Image(systemName: sending ? "ellipsis" : "arrow.up")
+                    Image(systemName: "arrow.up")
                         .font(.body.weight(.semibold))
+                        .frame(width: Self.controlSize, height: Self.controlSize)
                 }
                 .buttonStyle(.glassProminent)
+                .buttonBorderShape(.circle)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Every icon control in the bar is the same circle, so the row reads as one piece.
+    private static let controlSize: CGFloat = 26
+
+    private func circleButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.body)
+                .frame(width: Self.controlSize, height: Self.controlSize)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
     }
 
     private var placeholder: String {
@@ -122,8 +181,13 @@ struct ConversationView: View {
             await model.loadHistory(dmKey: key)
         }
         do {
+            var isFirstBatch = true
             for try await rows in observation.values(in: writer) {
                 messages = rows
+                if isFirstBatch {
+                    firstUnreadID = rows.first { !$0.isRead }?.id
+                    isFirstBatch = false
+                }
                 model.markRead(rows.filter { !$0.isRead }.map(\.id))
             }
         } catch {
@@ -154,6 +218,20 @@ struct ConversationView: View {
     }
 }
 
+struct UnreadDivider: View {
+    static let anchor = "unread-divider"
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(.red.opacity(0.6)).frame(height: 1)
+            Text("Unread")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.red)
+            Rectangle().fill(.red.opacity(0.6)).frame(height: 1)
+        }
+    }
+}
+
 struct MessageRow: View {
     let message: MessageRecord
     var startsGroup = true
@@ -176,16 +254,12 @@ struct MessageRow: View {
                         Text(message.senderName).font(.subheadline.weight(.semibold))
                         Text(message.date, format: .dateTime.hour().minute())
                             .font(.caption).foregroundStyle(.secondary)
+                        if message.editedAt != nil {
+                            Text("edited").font(.caption2).foregroundStyle(.tertiary)
+                        }
                     }
                 }
-                Text(MessageContent.attributed(html: message.renderedContent, messageID: message.id))
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if message.editedAt != nil {
-                Text("edited").font(.caption2).foregroundStyle(.tertiary)
+                MessageBody(html: message.renderedContent)
             }
         }
     }
@@ -196,6 +270,8 @@ struct Avatar: View {
     var size: CGFloat = 36
 
     private var tint: Color {
+        // Swift reseeds hashValue per process, so a name would change colour on every
+        // launch. This one is stable.
         let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .indigo]
         let seed = name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFFFF }
         return palette[seed % palette.count]

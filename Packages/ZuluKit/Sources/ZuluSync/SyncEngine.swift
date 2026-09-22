@@ -103,6 +103,7 @@ public actor SyncEngine {
         setStatus(.live)
 
         await refreshTopics()
+        await loadRecentDirectMessages()
     }
 
     /// Topics are not in the register snapshot and there is no bulk endpoint, so each
@@ -146,5 +147,17 @@ public actor SyncEngine {
                 break
             }
         }
+    }
+}
+
+extension SyncEngine {
+    /// DM conversations are derived from the messages themselves — there is no endpoint
+    /// that lists them. Without this initial fetch the DM list stays empty forever,
+    /// because a conversation has to be listed before it can be opened and loaded.
+    public func loadRecentDirectMessages(limit: Int = 300) async {
+        guard let page = try? await client.messages(
+            narrow: [.directMessages], anchor: .newest, before: limit
+        ) else { return }
+        try? store.save(messages: page.messages, selfUserID: selfUserID)
     }
 }
