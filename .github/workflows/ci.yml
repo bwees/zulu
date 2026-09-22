@@ -16,14 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Zulu targets iOS 27. A runner without the iOS 27 SDK will still build a
-      # deployment-target-27 project against an older SDK and miss every API that
-      # does not exist yet, so the toolchain is printed rather than assumed.
+      # Zulu's deployment target is iOS 27, but GitHub-hosted runners ship no Xcode
+      # newer than 26.x, so CI compiles against an older SDK than a developer does.
+      # Anything genuinely iOS 27-only will fail here while succeeding locally.
+      # Printing the toolchain keeps that gap visible instead of surprising someone.
       - name: Show available toolchains
         run: |
-          ls -d /Applications/Xcode*.app
           xcodebuild -version
-          xcodebuild -showsdks | grep -i iphone
+          xcodebuild -showsdks | grep -i iphonesimulator
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
