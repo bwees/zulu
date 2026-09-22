@@ -1,0 +1,5 @@
+# generated on boot when ZULU_OPENAPI_FILE is set
+openapi.json
+
+# the APNs signing key, mounted by compose
+secrets/

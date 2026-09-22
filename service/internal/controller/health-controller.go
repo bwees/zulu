@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"database/sql"
 
 	"github.com/go-fuego/fuego"
@@ -18,7 +17,7 @@ func NewHealthController(db *sql.DB) *HealthController {
 }
 
 func (c *HealthController) Health(ctx fuego.ContextNoBody) (HealthResponse, error) {
-	if err := c.ping(ctx.Context()); err != nil {
+	if err := c.db.PingContext(ctx.Context()); err != nil {
 		return HealthResponse{}, fuego.HTTPError{
 			Status: 503,
 			Title:  "Unavailable",
@@ -27,8 +26,4 @@ func (c *HealthController) Health(ctx fuego.ContextNoBody) (HealthResponse, erro
 		}
 	}
 	return HealthResponse{Status: "ok"}, nil
-}
-
-func (c *HealthController) ping(ctx context.Context) error {
-	return c.db.PingContext(ctx)
 }

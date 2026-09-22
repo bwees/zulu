@@ -58,10 +58,13 @@ type StatusResponse struct {
 	Devices       int    `json:"devices"`
 	// QueueConnected is true while this service is watching the account's Zulip
 	// events. While it is false, Zulip's own notifications take over again.
-	QueueConnected bool      `json:"queueConnected"`
-	Parked         bool      `json:"parked"`
-	LastEventAt    time.Time `json:"lastEventAt,omitempty"`
-	LastError      string    `json:"lastError,omitempty"`
+	QueueConnected bool `json:"queueConnected"`
+	Parked         bool `json:"parked"`
+	// ParkedUntil is when a parked worker will try again. Until then Zulip's own
+	// notifications are back in charge.
+	ParkedUntil time.Time `json:"parkedUntil,omitempty"`
+	LastEventAt time.Time `json:"lastEventAt,omitempty"`
+	LastError   string    `json:"lastError,omitempty"`
 }
 
 type HealthResponse struct {

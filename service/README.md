@@ -202,6 +202,17 @@ sealed. It never signs in on its own.
 model allows — and put the "this service can act as you" sentence in the
 onboarding flow rather than burying it in a settings screen.
 
+## Dependency floors
+
+`go.mod` pins four dependencies above what the libraries themselves require,
+each past a known advisory: `golang-jwt/jwt/v5` (GO-2025-3553) and
+`golang.org/x/net` (GO-2026-4918) over `sideshow/apns2`'s floors,
+`golang-jwt/jwt/v4` (GO-2025-3553, GO-2024-3250), and `getkin/kin-openapi`
+(GO-2026-6112, GO-2026-6095) over fuego's. `go mod tidy` drops the comments
+explaining why when it re-sorts the file, which is what this section is for.
+`govulncheck ./...` is clean apart from GO-2026-5932 in `golang.org/x/crypto`,
+which has no fixed version yet and is not on any path this service calls.
+
 ## Tests
 
 ```sh

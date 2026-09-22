@@ -87,6 +87,11 @@ struct EmojiDisplayView: View {
     @Environment(AppModel.self) private var model
     @State private var image: UIImage?
 
+    /// A unicode emoji drawn at point size N occupies noticeably more than N points — the
+    /// glyph overshoots its em box. An image sized to exactly N therefore looks smaller
+    /// than the emoji beside it, so custom emoji are scaled to match what the glyph does.
+    private var imageSide: CGFloat { size * 1.28 }
+
     var body: some View {
         switch display {
         case .glyph(let glyph):
@@ -106,11 +111,11 @@ struct EmojiDisplayView: View {
     @ViewBuilder
     private func imageView(path: String) -> some View {
         if let image {
-            AnimatedImageView(image: image, size: size)
-                .frame(width: size, height: size)
+            AnimatedImageView(image: image, size: imageSide)
+                .frame(width: imageSide, height: imageSide)
         } else {
             Color.clear
-                .frame(width: size, height: size)
+                .frame(width: imageSide, height: imageSide)
                 .task(id: path) {
                     guard let data = await model.imageData(at: path) else { return }
                     image = AnimatedImage.decode(data)

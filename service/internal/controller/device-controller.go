@@ -98,6 +98,7 @@ func (c *DeviceController) Status(ctx fuego.ContextNoBody) (StatusResponse, erro
 		Devices:        status.Devices,
 		QueueConnected: status.Health.Connected,
 		Parked:         status.Health.Parked,
+		ParkedUntil:    status.Health.ParkedUntil,
 		LastEventAt:    status.Health.LastEventAt,
 		LastError:      status.Health.LastError,
 	}, nil
