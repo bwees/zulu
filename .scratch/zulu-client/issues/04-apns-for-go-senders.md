@@ -1,7 +1,7 @@
 # APNs from a Go service, multi-device
 
 Type: research
-Status: claimed
+Status: resolved
 
 ## Question
 
@@ -19,3 +19,15 @@ Find:
 ## Research output
 
 `.scratch/zulu-client/research/04-apns-for-go-senders.md`
+
+## Answer
+
+`apns-collapse-id` is the piece everything else hangs off: Apple documents that for remote notifications it becomes `UNNotificationRequest.identifier`, so a deterministic id per message makes the delivered notification predictable on every device — which is exactly what `removeDeliveredNotifications(withIdentifiers:)` needs to clear a notification after the user reads elsewhere.
+
+There is no APNs delete API. Clearing on read needs a background push, which Apple caps at 2–3/hour and does not guarantee, so foreground reconciliation via `deliveredNotifications()` has to be the backstop. On macOS it has to be the *primary* mechanism: AppKit has no `didReceiveRemoteNotification:fetchCompletionHandler:` and only delivers pushes while the app runs.
+
+Go side: `sideshow/apns2` is the only real option and is dormant — last release Oct 2024, untagged master. Token refresh is correct. Two dependency floors must be raised in our own `go.mod`: `golang-jwt/jwt/v5 ≥ v5.3.1` and `golang.org/x/net ≥ v0.59.0`. It also cannot send `apns-expiration: 0`, which read-state pushes want, so it goes behind an interface.
+
+Flagged risk: `UNNotificationServiceExtension` is documented macOS 10.14+ but Apple's own guide is iOS-only and it reportedly does not launch reliably on Mac. It gates avatars and communication notifications there — prototype it early.
+
+Full findings: `.scratch/zulu-client/research/04-apns-for-go-senders.md`

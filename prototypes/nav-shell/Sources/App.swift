@@ -52,9 +52,8 @@ struct Switcher: View {
                 Button { withAnimation(.snappy) { collapsed = false } } label: {
                     Text(variant.rawValue)
                         .font(.caption.weight(.bold).monospaced())
-                        .foregroundStyle(.black)
                         .frame(width: 28, height: 28)
-                        .background(.yellow, in: Circle())
+                        .glassEffect(.regular.tint(.yellow).interactive(), in: .circle)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -67,16 +66,14 @@ struct Switcher: View {
                             .font(.system(size: 8, weight: .medium))
                             .opacity(0.6)
                     }
-                    .foregroundStyle(.black)
                     .frame(width: 140)
                     button("chevron.right") { variant = variant.next }
-                    Divider().frame(height: 18).overlay(.black.opacity(0.2))
+                    Divider().frame(height: 18)
                     button("minus") { collapsed = true }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(.yellow, in: Capsule())
-                .shadow(radius: 8, y: 3)
+                .glassEffect(.regular.tint(.yellow), in: .capsule)
             }
         }
         .offset(y: offsetY + dragY)
@@ -92,7 +89,7 @@ struct Switcher: View {
         Button { withAnimation(.snappy, action) } label: {
             Image(systemName: symbol)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.black)
+
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }

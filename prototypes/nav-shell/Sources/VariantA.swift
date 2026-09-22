@@ -19,7 +19,7 @@ struct VariantA: View {
     @State private var drag: CGFloat = 0
     @State private var path: [Topic] = []
 
-    private let railW: CGFloat = 68
+    private let railW: CGFloat = 80
     private let listW: CGFloat = 236
     private var drawerW: CGFloat { railW + listW }
 
@@ -29,8 +29,8 @@ struct VariantA: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            Color(.systemGroupedBackground).ignoresSafeArea()
-            drawer
+            Color(.systemBackground).ignoresSafeArea()
+            if offset > 0 { drawer }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemBackground))
@@ -103,8 +103,9 @@ struct VariantA: View {
             }
             .padding(.vertical, 12)
         }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .frame(width: railW)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color(.secondarySystemGroupedBackground).ignoresSafeArea(edges: .vertical))
     }
 
     private func railButton<L: View>(
@@ -117,11 +118,14 @@ struct VariantA: View {
     ) -> some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: active ? 14 : 24)
-                    .fill(active ? tint.gradient : Color(.tertiarySystemFill).gradient)
+                label()
+                    .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                     .frame(width: 46, height: 46)
-                    .overlay(label().foregroundStyle(active ? .white : .secondary))
-                Badge(count: badge, mention: mention).offset(x: 2, y: -4)
+                    .glassEffect(
+                        .regular.tint(active ? tint : nil).interactive(),
+                        in: .rect(cornerRadius: active ? 14 : 23)
+                    )
+                Badge(count: badge, mention: mention).offset(x: 6, y: -4)
             }
             .overlay(alignment: .leading) {
                 Capsule()
@@ -158,7 +162,7 @@ struct VariantA: View {
                 .padding(.vertical, 8)
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemGroupedBackground).ignoresSafeArea(edges: .vertical))
     }
 
     private var sectionTitle: String {
@@ -300,16 +304,15 @@ private struct TopicListA: View {
         .listStyle(.plain)
         .navigationTitle("#\(channel.name)")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        .safeAreaBar(edge: .bottom) {
             Button { } label: {
                 Label("New topic", systemImage: "square.and.pencil")
                     .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
             }
-            .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
+            .buttonStyle(.glassProminent)
         }
     }
 }

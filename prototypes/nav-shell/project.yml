@@ -1,8 +1,8 @@
 name: NavShell
 options:
-  bundleIdPrefix: com.zulu
+  bundleIdPrefix: com.bwees
   deploymentTarget:
-    iOS: "18.0"
+    iOS: "27.0"
   createIntermediateGroups: true
 targets:
   NavShell:
@@ -11,7 +11,7 @@ targets:
     sources: [Sources]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.zulu.navshell
+        PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu.navshell
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait

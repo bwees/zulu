@@ -1,7 +1,7 @@
 # Zulip's notification settings model
 
 Type: research
-Status: claimed
+Status: resolved
 
 ## Question
 
@@ -17,3 +17,18 @@ Find:
 ## Research output
 
 `.scratch/zulu-client/research/03-zulip-notification-settings.md`
+
+## Answer
+
+Yes — all four state layers are readable and writable by a third party, and the decision is fully replicable. Globals on `UserProfile` (`PATCH /settings`), per-channel tri-state on `Subscription` where `null` means inherit (`POST /users/me/subscriptions/properties`), `UserTopic.visibility_policy` as `INHERIT/MUTED/UNMUTED/FOLLOWED` (`POST /user_topics`), and `MutedUser`. All four come back in one `POST /register` and stay current via their matching events.
+
+Precedence: muted topic → muted channel → per-channel value if non-null → global, then an eight-way ordered trigger switch from DM down to the channel setting.
+
+Four findings that change the design:
+
+- **The server never tells clients its decision** — `internal_data` is stripped from `GET /events`. The service must reimplement the resolver; the per-user `flags` field is the only trustworthy mention signal, so never re-parse content.
+- **Personal mentions ignore every mute.** `@**you**` in a muted topic still pushes; `@**all**` in the same topic does not.
+- **`FOLLOWED` is an additive channel**, not a stronger unmute — it bypasses both channel mute and the per-channel push override, and answers only to the global followed-topic setting.
+- **Neither zulip-flutter nor zulip-mobile implements this**, so there is no reference to copy. The research doc's §13 pseudocode is the spec.
+
+Full findings: `.scratch/zulu-client/research/03-zulip-notification-settings.md`

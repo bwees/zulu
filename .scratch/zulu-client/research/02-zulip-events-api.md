@@ -65,15 +65,61 @@ Source: <https://zulip.com/api/register-queue>, `zerver/openapi/zulip.yaml` line
 
 ### `event_types` vs `fetch_event_types`
 
-- `event_types` controls the *stream*: which events the queue will deliver.
-- `fetch_event_types` controls the *snapshot*: which state keys the `/register` response contains.
-- If `fetch_event_types` is omitted it defaults to `event_types`. If both are omitted, you get
-  everything, for both.
-- Unsupported types are ignored rather than erroring, explicitly so a client can support several
-  server versions: "Event types not supported by the server are ignored, in order to simplify the
-  implementation of client apps that support multiple server versions."
+These are two different subsystems, wired separately in `do_events_register`:
 
-Source: `zerver/openapi/zulip.yaml`, `fetch_event_types` description.
+- `event_types` is passed to `request_event_queue` — the *queue subscription filter*, controlling
+  which future events Tornado delivers.
+- `fetch_event_types` becomes `event_types_set`, passed to `fetch_initial_state_data` — the
+  *snapshot filter*, controlling which state keys the `/register` response contains.
+
+| You pass | Queue delivers | Snapshot contains |
+| --- | --- | --- |
+| neither | all events | all state keys |
+| `event_types` only | those types | state for those types |
+| `fetch_event_types` only | **all events** | state for those types |
+| both | `event_types` | `fetch_event_types` |
+
+The third row is the trap: **`fetch_event_types` alone does not narrow the queue.** That is
+deliberate, and it is what all three reference clients do.
+
+Unsupported types are ignored rather than erroring, explicitly so a client can support several
+server versions: "Event types not supported by the server are ignored, in order to simplify the
+implementation of client apps that support multiple server versions."
+
+Source: `zerver/lib/events.py` (`do_events_register`), `zerver/openapi/zulip.yaml`.
+
+**The two parameters do not take the same vocabulary.** `fetch_event_types` takes the ~42 strings
+passed to `want()` in `fetch_initial_state_data`; `event_types` takes literal event `type` strings
+matched in `accepts_event`. Names that are valid fetch keys but are **not** event types — putting
+them in `event_types` silently subscribes to nothing:
+
+| Fetch key | Actual event type |
+| --- | --- |
+| `realm_user_groups` | `user_group` |
+| `navigation_views` | `navigation_view` |
+| `channel_folders` | `channel_folder` |
+| `video_calls` | `has_zoom_token` / `has_webex_token` |
+| `starred_messages` | none — kept current by `update_message_flags` |
+| `recent_private_conversations` | none — kept current by `message` |
+| `realm_billing`, `realm_embedded_bots`, `realm_incoming_webhook_bots`, `stop_words`, `giphy`, `tenor`, `klipy` | none — static fetch-only data |
+
+And the converse — event types with no state key: `delete_message`, `update_message`, `reaction`,
+`typing`, `submessage`, `heartbeat`, `restart`, `attachment`, `realm_export`, `web_reload_client`.
+
+Source: `zerver/lib/events.py` (`want()` calls), `zerver/tornado/event_queue.py`
+(`accepts_event`), `web/src/server_event_types.ts` (`FETCH_EVENT_TYPES`).
+
+One more sharp edge: `apply_events` is passed the raw `fetch_event_types`, not the resolved set. So
+if you pass only `event_types`, `apply_events` gets `None` and replays every race-window event onto
+the state, including keys you did not ask for. The server carries its own warning:
+
+```python
+if fetch_event_types is not None and event["type"] not in fetch_event_types:
+    # TODO: continuing here is not, most precisely, correct.
+    # ... For now, be careful in your choice of `fetch_event_types`.
+```
+
+Source: `zerver/lib/events.py`, `apply_events`.
 
 The docs are blunt about the cost of not filtering: "Before using your client in production, you
 should set appropriate `event_types` and `fetch_event_types` filters so that your client only
@@ -158,13 +204,25 @@ connection.post('registerQueue', InitialSnapshot.fromJson, 'register', {
 
 Source: <https://github.com/zulip/zulip-flutter/blob/main/lib/api/route/events.dart>.
 
-Two things worth copying and one worth not: copy the capability set and `apply_markdown: true`;
-note that Flutter deliberately does **not** filter `event_types`, contradicting the docs' advice,
-because the app genuinely wants everything. Zulu's *app* queue is in the same position. Zulu's
-*notification service* queue is not: it should filter down to roughly
-`["message", "update_message", "delete_message", "update_message_flags", "user_settings",
-"user_topic", "subscription", "realm_user"]` so the server does not ship it presence and typing
-traffic it will discard.
+**All three reference clients leave `event_types` unset.** Flutter passes neither parameter;
+zulip-mobile passes a 24-entry `fetch_event_types` allowlist and no `event_types`; the web app
+passes `fetch_event_types: FETCH_EVENT_TYPES` and no `event_types`. The intended production pattern
+is: trim the *snapshot* with `fetch_event_types`, receive all events, and dispatch client-side.
+
+Source: <https://github.com/zulip/zulip-flutter/blob/main/lib/api/route/events.dart>,
+<https://github.com/zulip/zulip-mobile/blob/main/src/api/registerForEvents.js>,
+`zerver/lib/home.py` and `web/src/ui_init.js`.
+
+The web app's server-side register call is the most tuned of the three: `include_subscribers="partial"`,
+`include_streams=False`, `slim_presence=True`, `presence_history_limit_days=365`, and all eleven
+client capabilities including `user_list_incomplete=True`.
+
+Source: `zerver/lib/home.py`.
+
+For Zulu: copy Flutter's capability set and `apply_markdown: true`. The app queue wants everything.
+The notification-service queue is the one case where narrowing `event_types` is worth it — but see
+the `accepts_messages()` interaction in section 5 before deciding, because dropping `message` from
+`event_types` changes how the server judges whether the user is online.
 
 ### Server version floor
 
@@ -1095,3 +1153,381 @@ Legacy `op: "update"` replaces the whole table. With `individual_emoji_changes` 
 | 419 | `simplified_presence_events` capability, modern `presence` event. |
 | 439 | `update_display_settings` / `update_global_notifications` removed. |
 | 491 | `realm_emoji` `add` / `update_one` ops. |
+
+## 10. The initial state snapshot
+
+Sources: <https://zulip.com/api/register-queue>, `zerver/openapi/zulip.yaml`,
+`zerver/lib/events.py` (`fetch_initial_state_data`, `apply_events`, `post_process_state`),
+`zerver/lib/message.py`, `zerver/lib/subscription_info.py`, `zerver/lib/presence.py`.
+
+The 200 response has roughly **290 top-level keys**, of which ~150 are scalar `realm_*` / `server_*`
+settings gated on `fetch_event_types: ["realm"]`.
+
+`post_process_state` does the final renames: `raw_unread_msgs` → `unread_msgs` (via
+`aggregate_unread_data`); `raw_users` → partitioned by `is_active` into `realm_users` and
+`realm_non_active_users`, sorted by ID, with `is_active` then popped from every dict;
+`raw_recent_private_conversations` → `recent_private_conversations`, sorted by `-max_message_id`.
+
+### The expensive keys, in rough descending order
+
+| Key | Why it is big |
+| --- | --- |
+| `never_subscribed` | Every channel visible to the user that they have never joined. With `include_subscribers=true`, each entry carries a full `subscribers` int array. This is an O(channels × subscribers) matrix and the single largest item on a big realm. |
+| `subscriptions` / `unsubscribed` | Full subscription objects, also carrying `subscribers` / `partial_subscribers`. |
+| `realm_users` | One user object per active account. Avatar URLs dominate the per-user cost. |
+| `realm_non_active_users` | Deactivated accounts, same shape. On an old realm this can rival `realm_users`. |
+| `unread_msgs` | Up to 50 000 message IDs plus per-conversation grouping. |
+| `presences` | One entry per recently-active user; bounded by `presence_history_limit_days`. |
+| `recent_private_conversations` | `{max_message_id, user_ids}` per conversation. |
+| `user_status` | Every user who has set a status. |
+| `streams` | Only present when `stream` is in `fetch_event_types` **and** `include_streams`. The web app deliberately omits it and derives everything from `subscription`. |
+
+Small and bounded: `cross_realm_bots`, `realm_emoji`, `custom_profile_fields`, `user_topics`,
+`muted_topics`, `starred_messages`, `realm_user_groups`, `channel_folders`, `realm_bots`,
+`realm_linkifiers`, `realm_playgrounds`, `realm_domains`, `drafts`, `saved_snippets`,
+`scheduled_messages`, `reminders`, `devices`, `navigation_views`, `stop_words`,
+`realm_embedded_bots`, `realm_incoming_webhook_bots`.
+
+`max_message_id` is **deprecated**: "This field may be removed in future versions as it no longer
+has a clear purpose. Clients wishing to fetch the latest messages should pass `"anchor": "latest"`
+to `GET /messages`." Do not build Zulu's message backfill around it.
+
+### `unread_msgs` requires two fetch types
+
+```python
+if want("update_message_flags") and want("message"):
+    # Keeping unread_msgs updated requires both message flag updates and
+    # message updates. This is due to the fact that new messages will not
+    # generate a flag update so we need to use the flags field in the
+    # message event.
+```
+
+Source: `zerver/lib/events.py`. So `fetch_event_types` must contain **both** `message` and
+`update_message_flags` or `unread_msgs` is simply absent.
+
+Similarly, `muted_topics` is only emitted in the snapshot when `user_topic` was *not* explicitly
+requested — the same back-compat gate as the event-level suppression.
+
+### How big it actually gets
+
+There are no published byte figures. The only quantitative statements in primary sources are
+qualitative with a unit:
+
+- `include_subscribers`: "the full subscriber matrix may be several megabytes of data."
+- `user_avatar_url_field_optional`: "This is an important optimization in organizations with 10,000s
+  of users."
+
+The concrete caps and levers that do exist:
+
+**`MAX_UNREAD_MESSAGES = 50000`** (`zerver/lib/message.py`):
+
+```python
+# We won't try to fetch more unread message IDs from the database than
+# this limit.  The limit is super high, in large part because it means
+# client-side code mostly doesn't need to think about the case that a
+# user has more older unread messages that were cut off.
+MAX_UNREAD_MESSAGES = 50000
+```
+
+Rows are ordered `-message_id` ("Descending order, so truncation keeps the latest unreads") and
+`old_unreads_missing` is set as exactly `total_unreads == MAX_UNREAD_MESSAGES`.
+
+**`MIN_PARTIAL_SUBSCRIBERS_CHANNEL_SIZE = 1000`** (`zproject/default_settings.py`). With
+`include_subscribers="partial"`, channels at or above this size return `partial_subscribers`
+(bots plus users where `NOT long_term_idle`), everything below returns full `subscribers`.
+`zerver/lib/subscription_info.py` notes the scale it is tuned for: "The raw SQL below leads to more
+than a 2x speedup when tested with 20k+ total subscribers."
+
+Note the discrepancy: the API docs *promise* full `subscribers` for channels under **250**
+subscribers, but the implementation threshold is **1000**. Since the docs also say the server "may
+use its discretion", 1000 is a legal superset of the 250 promise — but 250 is not a constant that
+exists anywhere in the source. Build against the documented 250 guarantee, not the 1000.
+
+**`presence_history_limit_days`** defaults to 14 (`zerver/lib/presence.py`); `0` means "the client
+doesn't want any presence data". The web app opts into
+`PRESENCE_HISTORY_LIMIT_DAYS_FOR_WEB_APP = 365`.
+
+**`user_list_incomplete`** (FL 232) is a correctness/privacy capability, not primarily a size one:
+without it, inaccessible users still appear as placeholder "Unknown user" objects, so the array
+length does not change.
+
+**No cap** exists on `realm_users`, `realm_non_active_users`, or `never_subscribed`.
+`MAX_UNREAD_MESSAGES` is the only truncation in the snapshot.
+
+## 11. Unread state
+
+### `unread_msgs` shape
+
+Server types, `zerver/lib/message.py`:
+
+```python
+class UnreadStreamInfo(TypedDict):
+    stream_id: int
+    topic: str
+    unread_message_ids: list[int]
+
+class UnreadDirectMessageInfo(TypedDict):
+    other_user_id: int
+    sender_id: int          # Deprecated and misleading synonym for other_user_id
+    unread_message_ids: list[int]
+
+class UnreadDirectMessageGroupInfo(TypedDict):
+    user_ids_string: str
+    unread_message_ids: list[int]
+
+class UnreadMessagesResult(TypedDict):
+    pms: list[UnreadDirectMessageInfo]
+    streams: list[UnreadStreamInfo]
+    huddles: list[UnreadDirectMessageGroupInfo]
+    mentions: list[int]
+    count: int
+    old_unreads_missing: bool
+```
+
+Semantics that will bite if missed:
+
+- **`count` is not the total.** `count = len(pm_dict) + len(unmuted_stream_msgs) +
+  len(direct_message_group_dict)` — it deliberately **excludes muted stream messages**, while the
+  `streams` array **includes** them. Docs: "This includes muted channels and muted topics, even
+  though those messages are excluded from `count`."
+- `other_user_id` replaced the misleadingly-named `sender_id` at FL 119; `sender_id` is still
+  emitted and deprecated. For a self-DM, `other_user_id` is the current user's own ID.
+- `user_ids_string` on `huddles` includes **the current user**, comma-separated, sorted numerically:
+  `"1,2,3"`.
+- `unread_message_ids` arrays are sorted ascending.
+- `mentions` contains direct mentions even when muted, but **wildcard** mentions only when not
+  muted (`if not is_row_muted(...)`).
+- `topic` obeys the `empty_topic_name` capability.
+- `old_unreads_missing`: "When `true`, we recommend that clients display a warning, as they are
+  likely to produce erroneous results until reloaded." New in FL 44.
+- Before FL 213, mute and follow-topic were handled incorrectly in `count` and `mentions`.
+- Before FL 90, `streams` entries also carried `sender_ids`.
+
+### Which events mutate it
+
+Exactly four, per zulip-flutter's dispatcher:
+
+```dart
+unreads.handleMessageEvent(event);
+unreads.handleUpdateMessageEvent(event);
+unreads.handleDeleteMessageEvent(event);
+unreads.handleUpdateMessageFlagsEvent(event);
+```
+
+Source: <https://github.com/zulip/zulip-flutter/blob/main/lib/model/store.dart>.
+
+**`subscription` events do not mutate unread state**, contrary to what the ticket assumed. When you
+unsubscribe, or messages move to a channel you are not in, the server asynchronously marks them read
+and emits `update_message_flags`. The API docs: the `read` flag "is added after the user
+unsubscribes from a channel, or messages are moved to a not-subscribed channel, provided the user
+can still access the messages at all." The same applies to muting a sender.
+
+This is asynchronous, and the docs are explicit about the window: "the resulting change in message
+flags may happen later than the message move itself. The delay in that example is typically at most
+a few hundred milliseconds and can in rare cases be minutes or longer."
+
+Flutter's model documents the consequence for consumers:
+
+> "Messages in unsubscribed streams, and messages sent by muted users, are generally deemed read by
+> the server and shouldn't be expected to appear. They may still appear temporarily when the server
+> hasn't finished processing the message's transition to the muted or unsubscribed-stream state…
+> For that reason, consumers of this model may wish to filter out messages in unsubscribed streams
+> and messages sent by muted users."
+
+Source: <https://github.com/zulip/zulip-flutter/blob/main/lib/model/unreads.dart>.
+
+### The algorithm, as zulip-flutter implements it
+
+Data structures: `streams: Map<int streamId, TopicKeyedMap<QueueList<int>>>`,
+`dms: Map<DmNarrow, QueueList<int>>`, `mentions: Set<int>`, plus
+`locatorMap: Map<int messageId, SendableNarrow>` — a reverse index so a bare message ID can be
+removed in O(1) without scanning every bucket. This is the structure Zulu's GRDB schema should
+mirror (one unread row per message ID with its conversation key, plus an index on message ID).
+
+Snapshot load merges rather than clobbers, because "Older servers differentiate topics
+case-sensitively, but shouldn't" and the topic-keyed map is case-insensitive.
+
+Per event:
+
+- **`message`**: `if (message.flags.contains(MessageFlag.read)) return;` — the server's verdict
+  wins. Otherwise append (new messages are at the top of the ID range, so `addLast`, no merge sort).
+  Add to `mentions` if any mention flag is set.
+- **`update_message`**: two jobs. (1) Mention changes from a content edit: if read, no change; if
+  unread and not mentioned, remove from `mentions`; if unread and mentioned, add. Flutter notes that
+  these changes are *not* signalled by `update_message_flags`. (2) Moves: pop the IDs out of the old
+  `(streamId, topic)` bucket; if the destination channel is not subscribed, drop them entirely
+  rather than waiting for the delayed mark-as-read; otherwise re-index and merge-insert sorted.
+- **`delete_message`**: `mentions.removeAll(ids)`; for `stream` type, use the event's `stream_id` +
+  `topic` to hit one bucket directly; for direct, scan; then drop each ID from `locatorMap`.
+- **`update_message_flags`**, switched on `flag`:
+  - `starred` / `collapsed` / `has_alert_word` / `historical` / unknown → ignore.
+  - mention flags → on `add`, add IDs that are known-unread; on `remove`, remove.
+  - `read` + `add` + `all: true` → clear everything and set `oldUnreadsMissing = false`.
+  - `read` + `add` with IDs → remove from `mentions`, from the buckets, and from `locatorMap`.
+  - `read` + `remove` (mark unread) → **`message_details` is mandatory here.** These messages may
+    never have been in the client's history at all. Read each entry, set `mentions` from
+    `detail.mentioned`, build the conversation key from `stream_id` + `topic` or the DM user IDs,
+    write `locatorMap`, then merge-insert the sorted IDs (they can be arbitrarily old).
+
+### `old_unreads_missing` makes unread state tri-valued
+
+```dart
+/// The unread state for [messageId], or null if unknown.
+///
+/// May be unknown only if [oldUnreadsMissing].
+bool? isUnread(int messageId) {
+  final isPresent = locatorMap.containsKey(messageId);
+  if (oldUnreadsMissing && !isPresent) return null;
+  return isPresent;
+}
+```
+
+Present means unread; absent with `oldUnreadsMissing == false` means read; absent with
+`oldUnreadsMissing == true` means **unknown**. Zulu's read-state model needs the same third value,
+not a boolean.
+
+### Marking all as read
+
+`POST /mark_all_as_read` is **deprecated**: "clients should use the update personal message flags
+for narrow endpoint instead as this endpoint will be removed in a future release." It also batches,
+so a success response can carry `complete: false` and the client must repeat the request. Before
+FL 153 it was a single atomic operation that would time out on realms with tens of thousands of
+unreads.
+
+The modern path is a loop over `POST /messages/flags/narrow`. Flutter's parameters, each with a
+reason:
+
+- `anchor: AnchorCode.oldest`, `includeAnchor: false` — not `firstUnread`, because that is "the
+  oldest **non-muted** unread message, which would result in muted unreads older than the first
+  unread not being processed."
+- Append `is:unread` to the narrow — "That has a database index, so this can be an important
+  optimization in narrows with a lot of history."
+- `numBefore: 0, numAfter: 1000` — the server caps a batch at 5000
+  (`numBefore + numAfter <= 5000`); zulip-mobile uses 5000, web uses 1000 for more responsive
+  feedback.
+- Loop until `foundNewest`, re-anchoring each round on `NumericAnchor(result.lastProcessedId!)` with
+  `includeAnchor: false`.
+
+On success for the combined feed only, Flutter sets `oldUnreadsMissing = false` but deliberately
+**does not clear the unread sets**:
+
+> "We don't expect to get a mark-as-read event with `all: true`, even on completion of the last
+> batch of unreads." … "Best not to actually clear any unreads out of the model. That'll be handled
+> naturally when the event comes in… I assume a new unread message could arrive while the work is in
+> progress, and not get caught and marked as read. We should faithfully match that state."
+
+Source: <https://github.com/zulip/zulip-flutter/blob/main/lib/widgets/actions.dart>.
+
+## 12. Message history and avoiding gaps
+
+Messages are the documented **exception** to the register/events atomicity guarantee. From the
+developer docs:
+
+> "One exception to the protocol described in the last section is the actual messages. Because Zulip
+> clients usually fetch them in a separate AJAX call after the rest of the site is loaded, we don't
+> need them to be included in the initial state data. To handle those correctly, **clients are
+> responsible for discarding events related to messages that the client has not yet fetched.**"
+
+Source: <https://zulip.readthedocs.io/en/latest/subsystems/events-system.html>.
+
+So the rule is **not** "compare against `max_message_id`". It is: each message list knows whether it
+has reached the newest end of its range, and drops `message` events until it has. That is also why
+`max_message_id` is now marked deprecated.
+
+`GET /messages` pagination fields:
+
+- `anchor` — an integer ID, or `newest`, `oldest`, `first_unread`, or `date` (with `anchor_date`,
+  new in FL 445). String values are new in FL 1.
+- `include_anchor` (default `true`), new in FL 155.
+- `found_newest` / `found_oldest` — "Whether the server promises that the `messages` list includes
+  the very newest messages matching the narrow (used by clients that paginate their requests to
+  decide whether there may be more messages to fetch)."
+- `found_anchor` — false if the anchor did not exist, did not match the narrow, or was excluded.
+- `history_limited` — the history was truncated by plan restrictions; only set when `found_oldest`.
+- Batch size: "We recommend requesting at most 1000 messages in a batch… A maximum of 5000 messages
+  can be obtained per request; attempting to exceed this will result in an error."
+
+Flutter's implementation of the no-gap rule, in `handleMessageEvent`:
+
+```dart
+if (!haveNewest) {
+  // This message list's [messages] doesn't yet reach the new end
+  // of the narrow's message history.  (Either [fetchInitial] hasn't yet
+  // completed, or if it has then it was in the middle of history and no
+  // subsequent [fetchNewer] has reached the end.)
+  // So this still-newer message doesn't belong.
+  return;
+}
+```
+
+And the converse race — a fetch whose response was computed *after* the event's message was sent —
+is handled by replacing rather than duplicating:
+
+```dart
+final index = _findMessageWithId(message.id);
+if (index != -1) {
+  // We already have the message, from a fetch whose response was
+  // computed after the message was sent … Instead of adding a
+  // duplicate, adopt the event's copy of the message…
+  _replaceMessage(index, message);
+```
+
+It also trusts the server's resolved anchor ("the server has already done that work, reducing it to
+an int, `result.anchor`") and invalidates in-flight fetches with a `generation` counter so a
+renarrow discards stale responses. `kMessageListFetchBatchSize = 100`.
+
+Source: <https://github.com/zulip/zulip-flutter/blob/main/lib/model/message_list.dart>.
+
+For Zulu's local-first store this generalizes to: track, per conversation (or globally), the
+contiguous ID range you have actually fetched, and drop or defer `message` events outside it.
+Inserting an event message into a range you have not backfilled creates a hole that looks like
+history but is not.
+
+## 13. Answers to the ticket's questions, condensed
+
+- **`event_types` / `fetch_event_types`**: different subsystems, different vocabularies.
+  `fetch_event_types` alone does not narrow the queue. All three reference clients narrow only the
+  snapshot. `unread_msgs` requires both `message` and `update_message_flags` in `fetch_event_types`.
+- **Snapshot size**: ~290 top-level keys; subscriber lists are the dominant cost ("several
+  megabytes" on a large realm) and are the only thing with a dedicated three-valued parameter.
+  `MAX_UNREAD_MESSAGES = 50000` is the only truncation. No published byte benchmarks exist.
+- **The loop**: `POST /register` → `last_event_id` → `GET /events?queue_id&last_event_id` with the
+  HTTP timeout set to `event_queue_longpoll_timeout_seconds` (fallback 90s). Heartbeats every 45-55s.
+  IDs increase but skip. On `BAD_EVENT_QUEUE_ID` (HTTP 400), re-register from scratch, no backoff.
+- **Queue expiry**: 10 minutes idle by default, GC swept every minute, refreshed by *connecting* a
+  poll (not by receiving events). `idle_queue_timeout` lets you ask for up to 7 days, or `"mobile"`
+  for 12 hours — but only on FL 481+. There is no partial resync; recovery is a full re-register plus
+  a message-tail refetch.
+- **v1 event types**: all covered in sections 6 and 8. Two corrections to the ticket's list —
+  `muted_topics` is superseded by `user_topic` (FL 134) and you should request both; and there is no
+  `update_message_flags_remove` capability.
+- **Unread state**: `unread_msgs` in the snapshot, kept current by exactly four event types
+  (`message`, `update_message`, `delete_message`, `update_message_flags`). `subscription` events do
+  *not* touch it. `count` excludes muted channel messages while `streams` includes them.
+  `old_unreads_missing` makes the model tri-valued.
+- **Multiple queues per API key**: yes, unlimited in the code — but an actively-polling queue that
+  accepts `message` events makes the server treat the user as online, suppressing its own push and
+  email notifications, and there is a known duplicate-email bug when several of a user's queues are
+  GC'd in the same sweep.
+
+## 14. What I could not determine
+
+- **No published byte-size figures** for a real large realm's `/register` response. Only the
+  qualitative "several megabytes" for the subscriber matrix.
+- **Whether Zulip Cloud overrides `DEFAULT_RATE_LIMITING_RULES`** or imposes a deployment-level cap
+  on queues per user. Nothing public says so. The absence of a per-user queue cap is a negative
+  result from reading `zerver/tornado/event_queue.py`, not an explicit statement anywhere.
+- **`recent_private_conversations`' "1000 most recent"** is documented as the *original*
+  implementation's discretion, not a live constant. I did not trace the current code to a number.
+- **No authoritative enumerated list of valid `event_types` values** exists in the OpenAPI spec —
+  `EventTypeSchema` is just `type: string` with prose. The names used above were reconstructed from
+  the per-event `enum` constraints, and the fetch-name/event-name divergence table in section 2 is a
+  cross-reference of `want()` strings against those enums, not documented anywhere as such.
+- **`queue_lifespan_secs` does not exist.** The ticket's phrasing and zulip-mobile's binding both
+  reference it; the current parameter is `idle_queue_timeout` (FL 481) with `idle_queue_timeout_secs`
+  in the response.
+- **The docs' heartbeat interval conflicts with the code.** `/api/register-queue` says "every
+  minute" and `/api/get-events` says "a few minutes"; the code says 45-55s. Only the developer docs
+  ("at least once every 45s or so") match.
+- **Multi-shard Tornado behaviour** beyond the in-code TODO that `DELETE /events` returns 200 before
+  the queue is actually removed on a remote shard.

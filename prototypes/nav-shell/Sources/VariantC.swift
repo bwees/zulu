@@ -92,23 +92,24 @@ struct VariantC: View {
             .listStyle(.plain)
             .navigationTitle(groupFilter.flatMap { id in Fake.groups.first { $0.id == id }?.name } ?? "Inbox")
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .safeAreaBar(edge: .top, spacing: 0) {
                 ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(Filter.allCases) { f in
-                            chip(f.rawValue, active: filter == f, tint: .accentColor) { filter = f }
+                    GlassEffectContainer(spacing: 8) {
+                        HStack(spacing: 8) {
+                            ForEach(Filter.allCases) { f in
+                                chip(f.rawValue, active: filter == f, tint: .accentColor) { filter = f }
+                            }
+                            Divider().frame(height: 20)
+                            chip("All groups", active: groupFilter == nil, tint: nil) { groupFilter = nil }
+                            ForEach(Fake.groups) { g in
+                                chip(g.name, active: groupFilter == g.id, tint: g.tint) { groupFilter = g.id }
+                            }
                         }
-                        Divider().frame(height: 20)
-                        chip("All groups", active: groupFilter == nil, tint: .secondary) { groupFilter = nil }
-                        ForEach(Fake.groups) { g in
-                            chip(g.name, active: groupFilter == g.id, tint: g.tint) { groupFilter = g.id }
-                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
                 }
                 .scrollIndicators(.hidden)
-                .background(.bar)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -127,16 +128,11 @@ struct VariantC: View {
         }
     }
 
-    private func chip(_ label: String, active: Bool, tint: Color, action: @escaping () -> Void) -> some View {
+    private func chip(_ label: String, active: Bool, tint: Color?, action: @escaping () -> Void) -> some View {
         Button(action: { withAnimation(.snappy, action) }) {
-            Text(label)
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(active ? tint.opacity(0.2) : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(active ? .primary : .secondary)
+            Text(label).font(.subheadline.weight(.medium))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass(.regular.tint(active ? (tint ?? .accentColor) : nil).interactive()))
     }
 
     private func topicRow(_ g: ChannelGroup, _ c: Channel, _ t: Topic) -> some View {

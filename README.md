@@ -26,11 +26,11 @@ Each prototype is disposable and self-contained. Run one with its own script:
 
 ```sh
 prototypes/nav-shell/run.sh            # three iPhone navigation shells, A/B/C
-prototypes/nav-shell/run.sh "iPhone 17"  # pick a simulator
+prototypes/nav-shell/run.sh "iPhone Air"  # pick a simulator
 ```
 
 Flip between variants with the yellow bar, or jump straight to one:
 
 ```sh
-SIMCTL_CHILD_VARIANT=C xcrun simctl launch "iPhone 16 Pro" com.zulu.navshell
+SIMCTL_CHILD_VARIANT=C xcrun simctl launch "iPhone 17" com.bwees.zulu.navshell
 ```

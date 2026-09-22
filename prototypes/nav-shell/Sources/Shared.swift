@@ -71,7 +71,10 @@ struct MessageList: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            Composer(placeholder: subtitle.map { "Message \($0)" } ?? "Message \(title)")
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .safeAreaBar(edge: .bottom) {
+                Composer(placeholder: subtitle.map { "Message \($0)" } ?? "Message \(title)")
+            }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -93,21 +96,19 @@ struct Composer: View {
     @State private var draft = ""
     var body: some View {
         HStack(spacing: 10) {
-            Button { } label: { Image(systemName: "plus.circle.fill").font(.title2) }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+            Button { } label: { Image(systemName: "plus").font(.body.weight(.semibold)) }
+                .buttonStyle(.glass)
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...4)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 18))
-            Button { draft = "" } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
-                .buttonStyle(.plain)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .glassEffect(.regular, in: .capsule)
+            Button { draft = "" } label: { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
+                .buttonStyle(.glassProminent)
                 .disabled(draft.isEmpty)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-        .background(.bar)
+        .padding(.vertical, 8)
     }
 }

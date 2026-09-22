@@ -17,6 +17,7 @@ struct VariantB: View {
             Tab("You", systemImage: "person.crop.circle") { YouTabB() }
             Tab(role: .search) { SearchTabB() }
         }
+        .tabBarMinimizeBehavior(.onScrollDown)
     }
 }
 
@@ -63,33 +64,28 @@ private struct ChannelsTabB: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle(group.name)
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .safeAreaBar(edge: .top, spacing: 0) {
                 ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(Fake.groups.enumerated()), id: \.element.id) { i, g in
-                            Button {
-                                withAnimation(.snappy) { groupIndex = i }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Circle().fill(g.tint).frame(width: 8, height: 8)
-                                    Text(g.name).font(.subheadline.weight(.medium))
-                                    Badge(count: g.unread, mention: g.mentions > 0)
+                    GlassEffectContainer(spacing: 8) {
+                        HStack(spacing: 8) {
+                            ForEach(Array(Fake.groups.enumerated()), id: \.element.id) { i, g in
+                                Button {
+                                    withAnimation(.snappy) { groupIndex = i }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Circle().fill(g.tint).frame(width: 8, height: 8)
+                                        Text(g.name).font(.subheadline.weight(.medium))
+                                        Badge(count: g.unread, mention: g.mentions > 0)
+                                    }
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(
-                                    i == groupIndex ? Color.accentColor.opacity(0.18) : Color(.tertiarySystemFill),
-                                    in: Capsule()
-                                )
+                                .buttonStyle(.glass(.regular.tint(i == groupIndex ? g.tint : nil).interactive()))
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
                 }
                 .scrollIndicators(.hidden)
-                .background(.bar)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
