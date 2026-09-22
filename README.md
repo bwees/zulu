@@ -1,35 +1,41 @@
 # Zulu
 
-A native Zulip client for iOS and macOS, plus the notification service that feeds it.
+A native Zulip client for iOS and macOS.
 
 Zulu exists because the official clients make topics hard to live in. Here topics are
 first-class: a channel that uses them renders as a list of threads, a channel that
-doesn't renders as plain chat, and the app works out which is which. Channels group
-into user-defined folders that sync across your devices.
+doesn't renders as plain chat, and the app works out which is which.
 
 Minimum iOS 27, built on Liquid Glass.
 
 ## Status
 
-Pre-implementation. The way to the spec is being charted — see
-[`.scratch/zulu-client/map.md`](.scratch/zulu-client/map.md) for the destination, the
-decisions already locked, and what is still open.
+Early. Sign in against any Zulip server, read channels, topics and DMs, and send
+messages. A notification service is planned but not started.
+
+See [`.scratch/zulu-client/map.md`](.scratch/zulu-client/map.md) for the decisions
+already locked and what is still open.
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `.scratch/zulu-client/` | The wayfinder map, its decision tickets, and research notes |
+| `Packages/ZuluKit` | `ZulipAPI` (REST + events), `ZuluStore` (GRDB), `ZuluSync` (event queue) |
+| `App` | The iOS app |
 | `prototypes/` | Throwaway prototypes that answer one design question each |
+| `.scratch/zulu-client/` | The wayfinder map, its decision tickets, and research notes |
 
-## Prototypes
-
-Each prototype is disposable and self-contained. Run one with its own script:
+## Running it
 
 ```sh
-prototypes/nav-shell/run.sh              # the iPhone navigation shell
-prototypes/nav-shell/run.sh "iPhone Air" # pick a simulator
+cd App && xcodegen generate && open Zulu.xcodeproj
 ```
 
-`nav-shell` holds the chosen drawer shell. The two rejected shells — a native tab bar
-and a flat topic inbox — are on the `prototype/nav-shell-variants` branch.
+Then sign in with your Zulip organization's address. Password and SSO both work; SSO
+opens a browser and comes back through the `zulip://` callback the server hardcodes.
+
+The nav-shell prototype still runs on its own:
+
+```sh
+prototypes/nav-shell/run.sh
+```

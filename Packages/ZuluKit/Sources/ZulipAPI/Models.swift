@@ -1,0 +1,146 @@
+import Foundation
+
+public struct Reaction: Decodable, Sendable, Equatable, Hashable {
+    public let emoji_name: String
+    public let emoji_code: String
+    public let reaction_type: String
+    public let user_id: Int
+
+    /// Aliases share a code but not a name, so grouping by name would double-count.
+    public var groupingKey: String { "\(reaction_type):\(emoji_code)" }
+}
+
+public struct DisplayRecipient: Decodable, Sendable, Equatable {
+    public let id: Int
+    public let email: String?
+    public let full_name: String
+}
+
+public struct ZulipMessage: Decodable, Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let sender_id: Int
+    public let sender_full_name: String
+    public let sender_email: String
+    public let type: String
+    /// Rendered HTML, since requests set `apply_markdown`.
+    public let content: String
+    public let content_type: String
+    /// The topic. Still spelled `subject` on the wire; empty for direct messages.
+    public let subject: String
+    public let timestamp: Int
+    public let stream_id: Int?
+    public let avatar_url: String?
+    public let is_me_message: Bool
+    public let reactions: [Reaction]
+    public let flags: [String]?
+    public let last_edit_timestamp: Int?
+
+    /// A channel name for channel messages, the participant list for DMs.
+    public let display_recipient: DisplayRecipientField?
+
+    public var isChannelMessage: Bool { type == "stream" }
+    public var isRead: Bool { flags?.contains("read") ?? false }
+    public var isMentioned: Bool {
+        guard let flags else { return false }
+        return flags.contains("mentioned") || flags.contains("wildcard_mentioned")
+    }
+
+    public var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
+
+    public var dmParticipants: [DisplayRecipient] {
+        if case .users(let users) = display_recipient { return users }
+        return []
+    }
+
+    public var channelName: String? {
+        if case .channel(let name) = display_recipient { return name }
+        return nil
+    }
+}
+
+/// One wire field with two shapes: a channel name, or the people in a DM.
+public enum DisplayRecipientField: Decodable, Sendable, Equatable {
+    case channel(String)
+    case users([DisplayRecipient])
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let name = try? container.decode(String.self) {
+            self = .channel(name)
+        } else {
+            self = .users(try container.decode([DisplayRecipient].self))
+        }
+    }
+}
+
+public struct Subscription: Decodable, Sendable, Equatable, Identifiable {
+    public let stream_id: Int
+    public let name: String
+    public let description: String?
+    public let color: String?
+    public let invite_only: Bool?
+    public let is_muted: Bool?
+    public let pin_to_top: Bool?
+    public let desktop_notifications: Bool?
+    public let push_notifications: Bool?
+    public let is_web_public: Bool?
+
+    public var id: Int { stream_id }
+    public var isRestricted: Bool { invite_only ?? false }
+}
+
+public struct ChannelTopic: Decodable, Sendable, Equatable, Identifiable {
+    public let name: String
+    public let max_id: Int
+
+    public var id: String { name }
+}
+
+public struct ZulipUser: Decodable, Sendable, Equatable, Identifiable {
+    public let user_id: Int
+    public let full_name: String
+    public let email: String?
+    public let avatar_url: String?
+    public let is_bot: Bool?
+    public let is_active: Bool?
+    public let role: Int?
+
+    public var id: Int { user_id }
+}
+
+/// A narrow filter. Zulip accepts the object form on every modern server.
+public struct NarrowFilter: Encodable, Sendable, Equatable {
+    public let operator_: String
+    public let operand: Operand
+    public let negated: Bool
+
+    public enum Operand: Encodable, Sendable, Equatable {
+        case text(String)
+        case number(Int)
+        case numbers([Int])
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .text(let value): try container.encode(value)
+            case .number(let value): try container.encode(value)
+            case .numbers(let values): try container.encode(values)
+            }
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case operator_ = "operator"
+        case operand, negated
+    }
+
+    public init(_ operator_: String, _ operand: Operand, negated: Bool = false) {
+        self.operator_ = operator_
+        self.operand = operand
+        self.negated = negated
+    }
+
+    public static func channel(_ id: Int) -> NarrowFilter { .init("channel", .number(id)) }
+    public static func topic(_ name: String) -> NarrowFilter { .init("topic", .text(name)) }
+    public static func dm(_ userIDs: [Int]) -> NarrowFilter { .init("dm", .numbers(userIDs)) }
+}

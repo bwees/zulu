@@ -13,8 +13,7 @@ jobs:
   apple:
     name: Build (Apple)
     # Zulu's deployment target is iOS 27, so it needs the Xcode 27 image. That image
-    # is in public preview and arm64-only. If it ever stops picking up a runner,
-    # macos-latest still builds — against an older SDK that cannot see iOS 27 API.
+    # is in public preview and arm64-only.
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +26,22 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      # Placeholder target until the real app and its packages land. Each prototype
-      # that still builds is a prototype that can still be reacted to.
+      - name: Build ZuluKit
+        working-directory: Packages/ZuluKit
+        run: swift build
+
+      - name: Build app
+        working-directory: App
+        run: |
+          xcodegen generate
+          xcodebuild build \
+            -project Zulu.xcodeproj \
+            -scheme Zulu \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Build nav-shell prototype
         working-directory: prototypes/nav-shell
         run: |

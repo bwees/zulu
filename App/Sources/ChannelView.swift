@@ -1,0 +1,78 @@
+import GRDB
+import SwiftUI
+import ZuluStore
+
+/// A channel renders as a topic list or as flat chat, decided by how its traffic is
+/// actually spread. A channel whose messages all sit in one topic is a chat room.
+struct ChannelView: View {
+    let channel: ChannelSummary
+    @Environment(AppModel.self) private var model
+
+    @State private var topics: [TopicSummary] = []
+
+    var body: some View {
+        Group {
+            if channel.rendersAsForum || topics.count > 1 {
+                topicList
+            } else if let only = topics.first {
+                ConversationView(
+                    source: .topic(channelID: channel.id, name: only.name, channelName: channel.name)
+                )
+            } else {
+                EmptyStateView(text: "Nothing in #\(channel.name) yet.")
+            }
+        }
+        .task(id: channel.id) { await observeTopics() }
+    }
+
+    private var topicList: some View {
+        List {
+            ForEach(topics) { topic in
+                NavigationLink(value: ConversationView.Source.topic(
+                    channelID: channel.id, name: topic.name, channelName: channel.name
+                )) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Circle()
+                            .fill(topic.unreadCount > 0 ? Color.accentColor : .clear)
+                            .frame(width: 8, height: 8)
+                            .padding(.top, 6)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(topic.name.isEmpty ? "general chat" : topic.name)
+                                .font(.subheadline.weight(topic.unreadCount > 0 ? .semibold : .regular))
+                                .lineLimit(1)
+                            if let sender = topic.lastSender {
+                                Text(sender).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 4)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            if let date = topic.date {
+                                Text(date, format: .dateTime.hour().minute())
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Badge(count: topic.unreadCount)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("#\(channel.name)")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await model.refreshTopics() }
+    }
+
+    private func observeTopics() async {
+        guard let writer = model.databaseWriter, let observation = model.topics(inChannel: channel.id) else {
+            return
+        }
+        do {
+            for try await rows in observation.values(in: writer) {
+                topics = rows
+            }
+        } catch {
+            // Observation ends when the view goes away; nothing to recover.
+        }
+    }
+}

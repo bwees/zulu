@@ -1,0 +1,281 @@
+import AuthenticationServices
+import Foundation
+import GRDB
+import Observation
+import SwiftUI
+import ZulipAPI
+import ZuluStore
+import ZuluSync
+
+/// Everything the shell needs to know, in one place. Views read from it and call it;
+/// they never talk to the API or the database themselves.
+@MainActor
+@Observable
+final class AppModel {
+
+    enum Phase: Equatable {
+        case loading
+        case signedOut
+        case signedIn
+    }
+
+    enum Destination: Equatable, Hashable {
+        case channel(Int)
+        case dm(String)
+    }
+
+    private(set) var phase: Phase = .loading
+    private(set) var account: ZulipAccount?
+    private(set) var status: SyncStatus = .idle
+
+    private(set) var channels: [ChannelSummary] = []
+    private(set) var dms: [DMSummary] = []
+    private(set) var users: [Int: UserRecord] = [:]
+
+    var destination: Destination?
+    var signInError: String?
+    var isWorking = false
+
+    fileprivate var store: ZuluStore?
+    private var client: ZulipClient?
+    private var sync: SyncEngine?
+    private var observers: [AnyDatabaseCancellable] = []
+
+    // MARK: lifecycle
+
+    func bootstrap() async {
+        guard phase == .loading else { return }
+        if let saved = AccountStorage.load() {
+            await activate(saved)
+        } else {
+            phase = .signedOut
+        }
+    }
+
+    private func activate(_ account: ZulipAccount) async {
+        do {
+            let store = try ZuluStore(path: try ZuluStore.defaultURL().path())
+            let client = ZulipClient(account: account)
+            let sync = SyncEngine(client: client, store: store, selfUserID: account.userID)
+
+            self.account = account
+            self.store = store
+            self.client = client
+            self.sync = sync
+
+            observe(store)
+            phase = .signedIn
+
+            await sync.onStatusChange { [weak self] status in
+                Task { @MainActor in self?.status = status }
+            }
+            await sync.start()
+        } catch {
+            signInError = error.localizedDescription
+            phase = .signedOut
+        }
+    }
+
+    private func observe(_ store: ZuluStore) {
+        observers.removeAll()
+        observers.append(
+            store.observeChannels().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+                self?.channels = rows
+            }
+        )
+        observers.append(
+            store.observeDMs().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+                self?.dms = rows
+            }
+        )
+        observers.append(
+            store.observeUsers().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+                self?.users = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+            }
+        )
+    }
+
+    // MARK: sign in
+
+    func serverSettings(for input: String) async throws -> (URL, ServerSettings) {
+        guard let typed = ZulipClient.parseRealmURL(input) else {
+            throw ZulipError(kind: .badResponse, message: "That does not look like a server address.")
+        }
+        let settings = try await ZulipClient.serverSettings(realmURL: typed)
+        // The server's own URL is canonical from here on; what was typed may differ.
+        return (settings.canonicalURL(fallback: typed), settings)
+    }
+
+    func signIn(realmURL: URL, username: String, password: String) async {
+        isWorking = true
+        signInError = nil
+        defer { isWorking = false }
+        do {
+            let account = try await ZulipClient.signIn(
+                realmURL: realmURL, username: username, password: password
+            )
+            try AccountStorage.save(account)
+            await activate(account)
+        } catch {
+            signInError = Self.describe(error)
+        }
+    }
+
+    func signInWithBrowser(realmURL: URL, method: ExternalAuthMethod) async {
+        isWorking = true
+        signInError = nil
+        defer { isWorking = false }
+
+        let otp = WebAuth.generateOTP()
+        guard let url = WebAuth.authURL(realmURL: realmURL, method: method, otp: otp) else {
+            signInError = "That sign-in method has an address Zulu could not use."
+            return
+        }
+        do {
+            let callback = try await WebAuthSession.run(url: url, callbackScheme: "zulip")
+            guard let payload = WebAuth.parse(callback: callback),
+                  let account = WebAuth.account(from: payload, otp: otp, realmURL: realmURL)
+            else {
+                signInError = "The server sent back a sign-in reply Zulu could not verify."
+                return
+            }
+            try AccountStorage.save(account)
+            await activate(account)
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            return
+        } catch {
+            signInError = Self.describe(error)
+        }
+    }
+
+    func signOut() async {
+        await sync?.stop()
+        observers.removeAll()
+        try? store?.clearAll()
+        AccountStorage.clear()
+        account = nil
+        store = nil
+        client = nil
+        sync = nil
+        channels = []
+        dms = []
+        users = [:]
+        destination = nil
+        phase = .signedOut
+    }
+
+    // MARK: reading
+
+    func channel(_ id: Int) -> ChannelSummary? { channels.first { $0.id == id } }
+
+    func topics(inChannel id: Int) -> ValueObservation<ValueReducers.Fetch<[TopicSummary]>>? {
+        store?.observeTopics(inChannel: id)
+    }
+
+    var databaseWriter: (any DatabaseWriter)? { store?.writer }
+
+    func name(forUser id: Int) -> String { users[id]?.fullName ?? "User \(id)" }
+
+    /// Names a DM by its other participants, so a conversation is labelled the way a
+    /// person would label it.
+    func title(forDM key: String) -> String {
+        guard let selfID = account?.userID else { return key }
+        let others = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
+        if others.isEmpty { return "Notes to self" }
+        return others.map(name(forUser:)).sorted().joined(separator: ", ")
+    }
+
+    /// Backfills a conversation that the event queue alone would not have filled, since
+    /// the queue only carries what arrives after registration.
+    func loadHistory(channelID: Int, topic: String) async {
+        guard let client, let store, let account else { return }
+        let narrow = [NarrowFilter.channel(channelID), .topic(topic)]
+        if let page = try? await client.messages(narrow: narrow, anchor: .newest, before: 100) {
+            try? store.save(messages: page.messages, selfUserID: account.userID)
+        }
+    }
+
+    func loadHistory(dmKey: String) async {
+        guard let client, let store, let account else { return }
+        let ids = dmKey.split(separator: ",").compactMap { Int($0) }
+        if let page = try? await client.messages(narrow: [.dm(ids)], anchor: .newest, before: 100) {
+            try? store.save(messages: page.messages, selfUserID: account.userID)
+        }
+    }
+
+    func refreshTopics() async { await sync?.refreshTopics() }
+
+    // MARK: sending
+
+    func send(_ text: String, toChannel id: Int, topic: String) async -> String? {
+        guard let client else { return "Not signed in." }
+        do {
+            _ = try await client.sendMessage(toChannel: id, topic: topic, content: text)
+            return nil
+        } catch {
+            return Self.describe(error)
+        }
+    }
+
+    func send(_ text: String, toDM key: String) async -> String? {
+        guard let client, let selfID = account?.userID else { return "Not signed in." }
+        let recipients = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
+        do {
+            _ = try await client.sendMessage(toUsers: recipients.isEmpty ? [selfID] : recipients, content: text)
+            return nil
+        } catch {
+            return Self.describe(error)
+        }
+    }
+
+    func markRead(_ ids: [Int]) {
+        guard !ids.isEmpty else { return }
+        try? store?.setRead(ids: ids, read: true)
+    }
+
+    static func describe(_ error: Error) -> String {
+        guard let zulip = error as? ZulipError else { return error.localizedDescription }
+        return switch zulip.code {
+        case "AUTHENTICATION_FAILED": "That username or password was not accepted."
+        case "USER_DEACTIVATED": "That account has been deactivated."
+        case "REALM_DEACTIVATED": "That organization has been deactivated."
+        case "PASSWORD_AUTH_DISABLED": "This organization does not allow password sign-in."
+        case "RATE_LIMIT_HIT": "Too many attempts. Wait a few minutes and try again."
+        default: zulip.message
+        }
+    }
+}
+
+/// `ASWebAuthenticationSession` as an async call.
+enum WebAuthSession {
+    @MainActor
+    static func run(url: URL, callbackScheme: String) async throws -> URL {
+        final class Anchor: NSObject, ASWebAuthenticationPresentationContextProviding {
+            func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+                UIApplication.shared.connectedScenes
+                    .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+                    .first ?? ASPresentationAnchor()
+            }
+        }
+        let anchor = Anchor()
+        return try await withCheckedThrowingContinuation { continuation in
+            let session = ASWebAuthenticationSession(
+                url: url, callbackURLScheme: callbackScheme
+            ) { callback, error in
+                if let callback {
+                    continuation.resume(returning: callback)
+                } else {
+                    continuation.resume(throwing: error ?? CancellationError())
+                }
+            }
+            session.presentationContextProvider = anchor
+            session.prefersEphemeralWebBrowserSession = false
+            _ = withExtendedLifetime(anchor) { session.start() }
+        }
+    }
+}
+
+extension AppModel {
+    /// Views observe the database directly; they still never write to it.
+    var storeForReading: ZuluStore? { store }
+}

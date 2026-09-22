@@ -1,0 +1,41 @@
+name: Zulu
+options:
+  bundleIdPrefix: com.bwees
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+packages:
+  ZuluKit:
+    path: ../Packages/ZuluKit
+targets:
+  Zulu:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: ZuluKit
+        product: ZulipAPI
+      - package: ZuluKit
+        product: ZuluStore
+      - package: ZuluKit
+        product: ZuluSync
+    info:
+      path: Zulu-Info.plist
+      properties:
+        CFBundleDisplayName: Zulu
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # The Zulip server hardcodes a zulip:// redirect for the SSO flow, so the
+        # scheme is not ours to choose.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.bwees.zulu
+            CFBundleURLSchemes: [zulip]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu
+        SWIFT_VERSION: "6.0"
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
