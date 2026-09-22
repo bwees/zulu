@@ -472,3 +472,42 @@ extension AppModel {
     /// True once the store exists, so views that observe it know when to start.
     var isReady: Bool { store != nil }
 }
+
+// MARK: - Personal channel shape
+
+extension AppModel {
+    func promotedTopicObservation(inGroup id: String?)
+        -> ValueObservation<ValueReducers.Fetch<[PromotedTopicSummary]>>?
+    {
+        store?.observePromotedTopics(inGroup: id)
+    }
+
+    func promote(topic: String, inChannel channelID: Int, toGroup groupID: String? = nil) {
+        try? store?.promote(topic: topic, inChannel: channelID, toGroup: groupID)
+    }
+
+    func demote(topic: String, inChannel channelID: Int) {
+        try? store?.demote(topic: topic, inChannel: channelID)
+    }
+
+    func isPromoted(topic: String, inChannel channelID: Int) -> Bool {
+        (try? store?.isPromoted(topic: topic, inChannel: channelID)) ?? false
+    }
+
+    func setGroup(_ groupID: String?, forPromotedTopic topic: String, inChannel channelID: Int) {
+        try? store?.setGroup(groupID, forPromotedTopic: topic, inChannel: channelID)
+    }
+
+    func alias(forChannel id: Int) -> String? {
+        (try? store?.alias(forChannel: id)) ?? nil
+    }
+
+    /// The server's own name, which a mention has to emit even when the sidebar shows an alias.
+    func realName(forChannel id: Int) -> String? {
+        (try? store?.channels().first { $0.id == id })?.name
+    }
+
+    func setAlias(_ alias: String?, forChannel id: Int) {
+        try? store?.setAlias(alias, forChannel: id)
+    }
+}

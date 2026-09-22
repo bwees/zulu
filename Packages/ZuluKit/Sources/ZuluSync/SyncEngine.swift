@@ -129,6 +129,9 @@ public actor SyncEngine {
             if let topics = try? await client.topics(inChannel: channel.id) {
                 try? store.saveTopics(topics, inChannel: channel.id)
                 try? store.refreshDetectedMode(forChannel: channel.id)
+                // A promotion points at a topic name, and names move. Once the real
+                // list is in hand, promotions with nothing behind them are dropped.
+                try? store.pruneVanishedPromotions(inChannel: channel.id)
             }
         }
     }

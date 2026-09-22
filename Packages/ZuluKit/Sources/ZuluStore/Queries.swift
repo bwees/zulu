@@ -49,7 +49,7 @@ extension ZuluStore {
     public func observeChannels() -> ValueObservation<ValueReducers.Fetch<[ChannelSummary]>> {
         ValueObservation.tracking { db in
             try ChannelSummary.fetchAll(db, sql: """
-                SELECT c.id, c.name, c.isRestricted, c.isMuted, c.pinned,
+                SELECT c.id, COALESCE(c.alias, c.name) AS name, c.isRestricted, c.isMuted, c.pinned,
                        COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
@@ -75,6 +75,11 @@ extension ZuluStore {
                          ORDER BY m.id DESC LIMIT 1) AS lastTimestamp
                   FROM topic t
                  WHERE t.channelID = ?
+                   -- A promoted topic sits at channel level instead; listing it in
+                   -- both places would duplicate it and count its unread twice.
+                   AND t.name NOT IN (
+                       SELECT topic FROM promotedTopic WHERE channelID = t.channelID
+                   )
                  ORDER BY t.maxMessageID DESC
                 """, arguments: [id])
         }
@@ -201,7 +206,10 @@ extension ZuluStore {
                          WHERE m.channelID = t.channelID AND m.topic = t.name
                          ORDER BY m.id DESC LIMIT 1) AS lastTimestamp
                   FROM topic t
-                 WHERE (
+                 WHERE t.name NOT IN (
+                           SELECT topic FROM promotedTopic WHERE channelID = t.channelID
+                       )
+                   AND (
                         SELECT COUNT(*) FROM topic peer
                          WHERE peer.channelID = t.channelID
                            AND peer.maxMessageID > t.maxMessageID

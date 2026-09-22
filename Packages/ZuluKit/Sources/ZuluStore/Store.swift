@@ -153,6 +153,8 @@ public final class ZuluStore: Sendable {
 
         migrator.registerEmojiMigration()
 
+        registerPersonalShapeMigration(&migrator)
+
         return migrator
     }
 

@@ -17,6 +17,10 @@ struct ShellView: View {
 
     @State private var section: Section = .unfiled
     @State private var visibleChannels: [ChannelSummary] = []
+    @State private var visiblePromoted: [PromotedTopicSummary] = []
+    @State private var renamingChannel: ChannelSummary?
+    @State private var aliasDraft = ""
+    @State private var promotedTask: Task<Void, Never>?
     @State private var editingGroup: String?
     @State private var creatingGroup = false
     @State private var newGroupName = ""
@@ -218,6 +222,9 @@ struct ShellView: View {
                     if section == .dms {
                         ForEach(model.dms) { dm in dmRow(dm) }
                     } else {
+                        ForEach(visiblePromoted) { promoted in
+                            promotedRow(promoted)
+                        }
                         ForEach(visibleChannels) { channel in
                             channelRow(channel)
                             if channel.rendersAsForum {
@@ -252,9 +259,16 @@ struct ShellView: View {
     private func observeChannels() async {
         guard section != .dms else { return }
         let groupID: String? = if case .group(let id) = section { id } else { nil }
-        guard let writer = model.databaseWriter,
-              let observation = model.channelObservation(inGroup: groupID)
-        else { return }
+        guard let writer = model.databaseWriter else { return }
+        if let promoted = model.promotedTopicObservation(inGroup: groupID) {
+            promotedTask?.cancel()
+            promotedTask = Task {
+                do {
+                    for try await rows in promoted.values(in: writer) { visiblePromoted = rows }
+                } catch {}
+            }
+        }
+        guard let observation = model.channelObservation(inGroup: groupID) else { return }
         do {
             for try await rows in observation.values(in: writer) {
                 visibleChannels = rows
@@ -294,6 +308,11 @@ struct ShellView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button("Rename for me…", systemImage: "pencil") {
+                aliasDraft = model.alias(forChannel: channel.id) ?? ""
+                renamingChannel = channel
+            }
+            Divider()
             Picker("Show as", selection: Binding(
                 get: { model.modeOverride(forChannel: channel.id) },
                 set: { model.setMode($0, forChannel: channel.id) }
@@ -343,6 +362,14 @@ struct ShellView: View {
                             .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Promote to sidebar", systemImage: "arrow.up.left") {
+                                model.promote(
+                                    topic: topic.name, inChannel: channel.id,
+                                    toGroup: currentGroupID
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -374,6 +401,57 @@ struct ShellView: View {
                 path.addLine(to: CGPoint(x: rect.maxX, y: centre))
             }
             return path
+        }
+    }
+
+    /// A topic lifted out of its channel to sit at channel level. It shows the channel
+    /// it came from underneath, because the name alone rarely says where it lives.
+    private func promotedRow(_ promoted: PromotedTopicSummary) -> some View {
+        Button {
+            model.destination = .channel(promoted.channelID)
+            path = [.topic(
+                channelID: promoted.channelID, name: promoted.topic,
+                channelName: promoted.channelName
+            )]
+            setOpen(false)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tint)
+                    .frame(width: 26, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(promoted.displayName)
+                        .font(.subheadline.weight(promoted.unreadCount > 0 ? .semibold : .regular))
+                        .lineLimit(1)
+                    Text(promoted.channelName)
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if promoted.mentionCount > 0 {
+                    Badge(count: promoted.mentionCount, mention: true)
+                } else if promoted.unreadCount > 0 {
+                    Circle().fill(.primary).frame(width: 7, height: 7)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Remove from sidebar", systemImage: "arrow.down.right") {
+                model.demote(topic: promoted.topic, inChannel: promoted.channelID)
+            }
+            Menu("Move to group", systemImage: "folder") {
+                Button("Unfiled") {
+                    model.setGroup(nil, forPromotedTopic: promoted.topic, inChannel: promoted.channelID)
+                }
+                ForEach(model.groups) { group in
+                    Button(group.name) {
+                        model.setGroup(group.id, forPromotedTopic: promoted.topic, inChannel: promoted.channelID)
+                    }
+                }
+            }
         }
     }
 
@@ -422,6 +500,26 @@ struct ShellView: View {
         .sheet(item: Binding(get: { editingGroup.map(Identified.init) },
                              set: { editingGroup = $0?.value })) { wrapper in
             GroupEditor(groupID: wrapper.value)
+        }
+        .alert(
+            "Rename for me",
+            isPresented: Binding(
+                get: { renamingChannel != nil },
+                set: { if !$0 { renamingChannel = nil } }
+            )
+        ) {
+            TextField("Name", text: $aliasDraft)
+            Button("Cancel", role: .cancel) {}
+            if model.alias(forChannel: renamingChannel?.id ?? 0) != nil {
+                Button("Use real name", role: .destructive) {
+                    if let channel = renamingChannel { model.setAlias(nil, forChannel: channel.id) }
+                }
+            }
+            Button("Save") {
+                if let channel = renamingChannel { model.setAlias(aliasDraft, forChannel: channel.id) }
+            }
+        } message: {
+            Text("Only you see this name. Mentions and links still use the real one.")
         }
         .alert("New group", isPresented: $creatingGroup) {
             TextField("Name", text: $newGroupName)
@@ -544,5 +642,13 @@ struct ChannelIcon: View {
                         .offset(x: size * 0.34, y: -size * 0.2)
                 }
             }
+    }
+}
+
+extension ShellView {
+    /// The group the sidebar is currently showing, so a promotion lands where it was made
+    /// rather than always in the unfiled pile.
+    fileprivate var currentGroupID: String? {
+        if case .group(let id) = section { id } else { nil }
     }
 }
