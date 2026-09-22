@@ -12,22 +12,17 @@ concurrency:
 jobs:
   apple:
     name: Build (Apple)
-    runs-on: macos-latest
+    # Zulu's deployment target is iOS 27, so it needs the Xcode 27 image. That image
+    # is in public preview and arm64-only. If it ever stops picking up a runner,
+    # macos-latest still builds — against an older SDK that cannot see iOS 27 API.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
 
-      # Zulu's deployment target is iOS 27, but GitHub-hosted runners ship no Xcode
-      # newer than 26.x, so CI compiles against an older SDK than a developer does.
-      # Anything genuinely iOS 27-only will fail here while succeeding locally.
-      # Printing the toolchain keeps that gap visible instead of surprising someone.
-      - name: Show available toolchains
+      - name: Show toolchain
         run: |
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphonesimulator
-
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
 
       - name: Install xcodegen
         run: brew install xcodegen

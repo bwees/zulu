@@ -35,9 +35,15 @@ struct DrawerShell: View {
             if offset > 0 { drawer }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: offset > 0 ? 24 : 0))
-                .shadow(color: .black.opacity(offset > 0 ? 0.25 : 0), radius: 18, x: -6)
+                // The card is drawn behind the content rather than clipping it. Clipping
+                // the content would shave the toolbar's glass buttons against the corner,
+                // and letting the card ignore safe areas keeps the page full height.
+                .background {
+                    RoundedRectangle(cornerRadius: offset > 0 ? 28 : 0)
+                        .fill(Color(.systemBackground))
+                        .shadow(color: .black.opacity(offset > 0 ? 0.28 : 0), radius: 20, x: -8)
+                        .ignoresSafeArea()
+                }
                 .offset(x: offset)
                 .overlay {
                     if offset > drawerW * 0.4 {
