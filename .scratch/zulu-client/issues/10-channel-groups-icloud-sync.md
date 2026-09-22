@@ -1,7 +1,7 @@
 # Channel groups and iCloud sync
 
 Type: grilling
-Status: open
+Status: resolved
 Blocked by: 06
 
 ## Question
@@ -49,3 +49,18 @@ What is needed before this can be finished:
 - Then: a conflict rule (last-writer-wins on a per-group `modifiedAt` is probably enough,
   since a person editing their own groups on two devices at once is rare), and behaviour
   when iCloud is signed out — which should be "keep working locally", not "lose the groups".
+
+## Scope narrowed: icons stay local
+
+Group **icons are out of iCloud sync**. Only the text — group names, order, and channel
+membership — needs to travel between devices. An icon is a per-device nicety; losing it on a
+second device is a far smaller cost than the machinery of syncing binary payloads.
+
+That changes the mechanism. Without images the synced document is a few hundred bytes of
+JSON, which sits comfortably inside `NSUbiquitousKeyValueStore`'s 1MB budget, so CloudKit
+and its `CKAsset` handling are no longer required. KVS also brings last-writer-wins and
+change notifications for free, which is enough for a single person editing their own groups.
+
+Still blocked on the same thing: **iCloud of any kind needs an entitlement, which needs a
+Development Team on the target.** The project has none. When one exists, this is a small
+piece of work rather than a large one.
