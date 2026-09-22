@@ -429,7 +429,9 @@ struct ShellView: View {
             setOpen(false)
         } label: {
             HStack(spacing: 7) {
-                ChannelIcon(isForum: true, size: 15)
+                // A promoted topic is one conversation, not a list of them, so it takes
+                // the plain channel icon — and the lock if its parent channel is private.
+                ChannelIcon(isForum: false, restricted: promoted.isRestricted, size: 15)
                     .foregroundStyle(.tertiary)
                     .frame(width: 22, alignment: .leading)
                 Text(promoted.displayName)

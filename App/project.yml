@@ -31,6 +31,12 @@ targets:
       path: Zulu-Info.plist
       properties:
         CFBundleDisplayName: Zulu
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Without this, every TestFlight build sits at "Missing Compliance" until a
+        # human answers the export questionnaire in App Store Connect. Zulu only
+        # speaks HTTPS to a Zulip server, which is exempt.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -47,3 +53,13 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Bumped by hand when we decide a release is worth a new number.
+        MARKETING_VERSION: "1.0"
+        # Placeholder only. The release workflow overrides this on the xcodebuild
+        # command line with the commit count, so the checked-in value never reaches
+        # App Store Connect.
+        CURRENT_PROJECT_VERSION: "1"
+        # DEVELOPMENT_TEAM and CODE_SIGN_STYLE are deliberately absent. A team here
+        # gives the app a real application-identifier, which moves its default
+        # keychain access group and hides the API key AccountStorage already wrote.
+        # Signing settings are passed to the release archive by xcodebuild instead.

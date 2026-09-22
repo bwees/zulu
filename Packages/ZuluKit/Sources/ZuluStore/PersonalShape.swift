@@ -35,6 +35,9 @@ public struct PromotedTopicSummary: Decodable, FetchableRecord, Sendable, Identi
     public var topic: String
     public var groupID: String?
     public var channelName: String
+    /// Taken from the parent channel: a promoted topic is exactly as private as the
+    /// channel it came out of.
+    public var isRestricted: Bool
     public var unreadCount: Int
     public var mentionCount: Int
 
@@ -148,6 +151,7 @@ extension ZuluStore {
                 SELECT p.channelID, p.topic, p.groupID,
                        COALESCE(p.alias, NULLIF(p.topic, ''), 'general chat') AS displayName,
                        COALESCE(c.alias, c.name) AS channelName,
+                       c.isRestricted,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = p.channelID AND u.topic = p.topic) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
