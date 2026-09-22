@@ -39,3 +39,14 @@ Two layout rules came out of making it behave:
 
 - **The message page draws its card as a background, never as a clip.** Clipping the content shaves the toolbar's glass controls against the rounded corner. The card is a `RoundedRectangle` behind the content instead.
 - **That card ignores safe areas**, so the page runs the full height of the window under the status bar and home indicator rather than sitting in a letterboxed inset.
+
+## Follow-up: presence and user status
+
+Discord shows one "status"; Zulip has two distinct things, and the prototype now models both:
+
+- **Presence** — active / idle / offline, derived by the server from activity, plus an invisible mode. Rendered as a dot on the avatar: filled for active and idle, a hollow ring for offline and invisible, with a cutout so it reads as punched through rather than floating.
+- **User status** — an emoji and a short line the person writes themselves. Shown beside the name.
+
+Three surfaces carry it: DM rows in the drawer (dot plus status line, no dot on group DMs), the DM header (avatar, name, and status, tappable), and a user detail sheet reached by tapping any avatar in the message list. The sheet carries presence, last-active, status, role, pronouns, and local time.
+
+The rendering is settled. What is **not** settled, and needs its own ticket before the spec: how presence is actually fetched and kept current, how often it may be polled without being rude to the server, how much of it arrives in the register snapshot, and whether presence is worth the traffic on mobile at all.

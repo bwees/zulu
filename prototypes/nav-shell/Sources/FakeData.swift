@@ -3,6 +3,48 @@ import SwiftUI
 
 enum ChannelMode { case forum, chat }
 
+/// Zulip separates two things Discord blurs into one "status": presence, which the
+/// server derives from activity, and a user status the person writes themselves.
+enum Presence {
+    case active, idle, offline, invisible
+
+    var tint: Color {
+        switch self {
+        case .active: .green
+        case .idle: .orange
+        case .offline, .invisible: .gray
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .active: "Active"
+        case .idle: "Idle"
+        case .offline: "Offline"
+        case .invisible: "Invisible"
+        }
+    }
+
+    var hollow: Bool {
+        switch self {
+        case .offline, .invisible: true
+        case .active, .idle: false
+        }
+    }
+}
+
+struct User: Identifiable {
+    let id: String
+    var name: String { id }
+    var presence: Presence = .offline
+    var statusEmoji: String?
+    var statusText: String?
+    var pronouns: String?
+    var role = "Member"
+    var localTime: String?
+    var lastActive: String?
+}
+
 struct Msg: Identifiable {
     let id = UUID()
     let sender: String
@@ -51,6 +93,8 @@ struct DM: Identifiable {
     let unread: Int
     let isGroup: Bool
     var messages: [Msg] = []
+
+    var participants: [String] { name.components(separatedBy: ", ") }
 }
 
 private func msgs(_ pairs: [(String, String, String)]) -> [Msg] {
@@ -182,6 +226,31 @@ enum Fake {
             ("chris", "see the thread in #api design", "Sep 14"),
         ])),
     ]
+
+    static let users: [String: User] = [
+        "bwees": User(id: "bwees", presence: .active, statusEmoji: "🛠️", statusText: "building zulu",
+                      pronouns: "he/him", role: "Owner", localTime: "1:42 PM"),
+        "priya": User(id: "priya", presence: .active, statusEmoji: "📗", statusText: "in review",
+                      pronouns: "she/her", localTime: "1:42 PM"),
+        "theo": User(id: "theo", presence: .idle, statusEmoji: "🥪", statusText: "lunch",
+                     pronouns: "he/him", localTime: "7:42 PM"),
+        "june": User(id: "june", presence: .active, pronouns: "they/them", localTime: "10:42 AM"),
+        "sam": User(id: "sam", presence: .offline, localTime: "6:42 PM", lastActive: "3h ago"),
+        "dana": User(id: "dana", presence: .offline, statusEmoji: "🌴", statusText: "out until Thursday",
+                     pronouns: "she/her", localTime: "8:42 PM", lastActive: "2d ago"),
+        "marcy": User(id: "marcy", presence: .idle, localTime: "1:42 PM"),
+        "alya": User(id: "alya", presence: .active, role: "Admin", localTime: "9:42 PM"),
+        "gnprice": User(id: "gnprice", presence: .active, role: "Admin", localTime: "10:42 AM"),
+        "chris": User(id: "chris", presence: .invisible, localTime: "4:42 PM"),
+        "ci": User(id: "ci", presence: .active, statusEmoji: "🤖", statusText: "automation", role: "Bot"),
+        "prometheus": User(id: "prometheus", presence: .active, role: "Bot"),
+        "newcomer": User(id: "newcomer", presence: .active, localTime: "1:42 PM"),
+        "tim": User(id: "tim", presence: .offline, lastActive: "5d ago"),
+    ]
+
+    static func user(_ name: String) -> User {
+        users[name] ?? User(id: name)
+    }
 
     static var totalDMUnread: Int { dms.reduce(0) { $0 + $1.unread } }
     static var totalMentions: Int { groups.reduce(0) { $0 + $1.mentions } }

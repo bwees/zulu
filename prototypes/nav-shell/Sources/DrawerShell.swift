@@ -32,9 +32,12 @@ struct DrawerShell: View {
         min(max((open ? drawerW : 0) + drag, 0), drawerW)
     }
 
+    /// Quick enough to feel like a reveal rather than a transition.
+    private static let slide = Animation.snappy(duration: 0.24, extraBounce: 0)
+
     private func setOpen(_ value: Bool) {
         if value { drawerMounted = true }
-        withAnimation(.snappy, completionCriteria: .removed) {
+        withAnimation(Self.slide, completionCriteria: .removed) {
             open = value
             drag = 0
         } completion: {
@@ -69,6 +72,9 @@ struct DrawerShell: View {
                     DragGesture(minimumDistance: 12)
                         .onChanged { v in
                             guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                            // Left-to-right belongs to the drawer. Right-to-left is left
+                            // alone so row swipe actions keep it.
+                            guard open || v.translation.width > 0 else { return }
                             if v.translation.width > 0 { drawerMounted = true }
                             drag = v.translation.width
                         }
@@ -263,10 +269,20 @@ struct DrawerShell: View {
             setOpen(false)
         } label: {
             HStack(spacing: 8) {
-                Avatar(name: d.name, size: 28)
-                Text(d.name)
-                    .font(.subheadline.weight(d.unread > 0 ? .semibold : .regular))
-                    .lineLimit(1)
+                Avatar(
+                    name: d.name,
+                    size: 28,
+                    presence: d.isGroup ? nil : Fake.user(d.name).presence,
+                    cutout: Color(.systemGroupedBackground)
+                )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(d.name)
+                        .font(.subheadline.weight(d.unread > 0 ? .semibold : .regular))
+                        .lineLimit(1)
+                    if !d.isGroup, let status = Fake.user(d.name).statusText {
+                        Text(status).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 4)
                 Badge(count: d.unread, mention: true)
             }
@@ -284,7 +300,13 @@ struct DrawerShell: View {
             Group {
                 switch sel {
                 case .dm(let i):
-                    MessageList(title: Fake.dms[i].name, subtitle: nil, messages: Fake.dms[i].messages)
+                    let d = Fake.dms[i]
+                    MessageList(
+                        title: d.name,
+                        subtitle: d.isGroup ? "\(d.participants.count) people" : nil,
+                        messages: d.messages,
+                        headerUser: d.isGroup ? nil : Fake.user(d.name)
+                    )
                 case .channel(let gi, let ci):
                     let c = Fake.groups[gi].channels[ci]
                     if c.mode == .forum {
@@ -346,12 +368,12 @@ private struct TopicListA: View {
                         }
                         .padding(.vertical, 2)
                     }
-                    .swipeActions(edge: .leading) {
-                        Button { } label: { Label("Follow", systemImage: "bell") }.tint(.blue)
-                    }
+                    // Trailing only. Left-to-right anywhere in the app opens the drawer,
+                    // so a leading swipe action would fight it.
                     .swipeActions(edge: .trailing) {
                         Button { } label: { Label("Mute", systemImage: "bell.slash") }.tint(.gray)
                         Button { } label: { Label("Read", systemImage: "checkmark") }.tint(.green)
+                        Button { } label: { Label("Follow", systemImage: "bell") }.tint(.blue)
                     }
                 }
             } header: {

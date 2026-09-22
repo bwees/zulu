@@ -53,6 +53,7 @@ A handoff-ready implementation spec for **Zulu**: a SwiftUI client for iOS and m
 - **Mac keyboard and menu surface.** Command palette, menu bar, keyboard shortcuts.
 - **Notification Service Extension on macOS.** Reportedly unreliable; gates avatars and communication notifications there. Needs an on-device spike before the Mac notification design is settled.
 - **Testing strategy.** What gets unit tests, what gets snapshot tests, how the Go service is tested against a fake Zulip.
+- **User presence and status.** How presence is fetched and kept current, its polling cost on mobile, how much arrives in the register snapshot, and whether the client publishes its own presence. The rendering is decided; the mechanism is not.
 - **Rate limiting and API etiquette.** Backfill pacing, Zulip's rate limits, service-side request budgeting across many users.
 
 ## Out of scope
