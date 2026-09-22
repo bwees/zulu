@@ -32,7 +32,8 @@ struct MessageMarkupTests {
         #expect(blocks == [.image(
             source: "/user_uploads/thumbnail/2/b5/Kj/image.jpeg/840x560.webp",
             link: "/user_uploads/2/b5/Kj/image.jpeg",
-            alt: "image.jpeg"
+            alt: "image.jpeg",
+            aspectRatio: 1206.0 / 2140.0
         )])
     }
 
@@ -109,7 +110,9 @@ struct RealWorldMarkupTests {
         #expect(MessageMarkup.blocks(from: html) == [.image(
             source: "/user_uploads/thumbnail/2/60/Tng/image.png/840x560.webp",
             link: "/user_uploads/2/60/Tng/image.png",
-            alt: "image.png"
+            alt: "image.png",
+            // Reserved from data-original-dimensions="2062x1664".
+            aspectRatio: 2062.0 / 1664.0
         )])
     }
 
@@ -127,7 +130,7 @@ struct RealWorldMarkupTests {
         let blocks = MessageMarkup.blocks(from: html)
         #expect(blocks.count == 3)
         #expect(blocks[0] == .paragraph([InlineSpan(text: "before")]))
-        if case .image(let source, _, _) = blocks[1] {
+        if case .image(let source, _, _, _) = blocks[1] {
             #expect(source == "/user_uploads/a.png")
         } else {
             Issue.record("expected an image block in the middle")

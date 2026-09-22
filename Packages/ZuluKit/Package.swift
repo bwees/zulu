@@ -6,6 +6,8 @@ let package = Package(
     platforms: [.iOS(.v26), .macOS(.v26)],
     products: [
         .library(name: "ZulipAPI", targets: ["ZulipAPI"]),
+        .library(name: "ZuluCompose", targets: ["ZuluCompose"]),
+        .library(name: "ZuluEmoji", targets: ["ZuluEmoji"]),
         .library(name: "ZuluMarkup", targets: ["ZuluMarkup"]),
         .library(name: "ZuluPolls", targets: ["ZuluPolls"]),
         .library(name: "ZuluStore", targets: ["ZuluStore"]),
@@ -16,14 +18,19 @@ let package = Package(
     ],
     targets: [
         .target(name: "ZulipAPI"),
+        .target(name: "ZuluEmoji"),
+        .target(name: "ZuluCompose", dependencies: ["ZuluEmoji"]),
         .target(name: "ZuluMarkup"),
         .target(name: "ZuluPolls"),
         .target(name: "ZuluStore", dependencies: [
             "ZulipAPI",
+            "ZuluEmoji",
             .product(name: "GRDB", package: "GRDB.swift"),
         ]),
-        .target(name: "ZuluSync", dependencies: ["ZulipAPI", "ZuluStore"]),
-        .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore"]),
+        .target(name: "ZuluSync", dependencies: ["ZulipAPI", "ZuluEmoji", "ZuluStore"]),
+        .testTarget(name: "ZuluComposeTests", dependencies: ["ZuluCompose"]),
+        .testTarget(name: "ZuluEmojiTests", dependencies: ["ZuluEmoji"]),
+        .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore", "ZulipAPI", "ZuluEmoji"]),
         .testTarget(name: "ZuluMarkupTests", dependencies: ["ZuluMarkup"]),
         .testTarget(name: "ZuluPollsTests", dependencies: ["ZuluPolls"]),
     ]

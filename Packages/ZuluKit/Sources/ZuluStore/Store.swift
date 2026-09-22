@@ -151,6 +151,8 @@ public final class ZuluStore: Sendable {
             }
         }
 
+        migrator.registerEmojiMigration()
+
         return migrator
     }
 
@@ -239,6 +241,7 @@ public final class ZuluStore: Sendable {
         try writer.write { db in
             for table in [
                 "submessage", "reaction", "message", "topic", "channel", "user", "syncState", "unread",
+                "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber",
             ] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }

@@ -7,6 +7,9 @@ struct RemoteImage: View {
     let path: String
     var fullSize: String?
     var alt: String?
+    /// Width over height, when Zulip told us. Reserving the right height before the
+    /// bytes arrive is what stops the list reflowing under a scroll.
+    var aspectRatio: Double?
 
     @Environment(AppModel.self) private var model
     @State private var image: UIImage?
@@ -29,7 +32,7 @@ struct RemoteImage: View {
             } else {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(.quaternary)
-                    .frame(height: 160)
+                    .aspectRatio(aspectRatio ?? 4.0 / 3.0, contentMode: .fit)
                     .overlay { ProgressView() }
             }
         }

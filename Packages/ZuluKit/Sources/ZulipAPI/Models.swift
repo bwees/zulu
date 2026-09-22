@@ -110,6 +110,9 @@ public struct Subscription: Decodable, Sendable, Equatable, Identifiable {
     public let desktop_notifications: Bool?
     public let push_notifications: Bool?
     public let is_web_public: Bool?
+    /// Only present when the request asked for subscribers. Used to rank the people in
+    /// a channel's `@` list above everyone else.
+    public let subscribers: [Int]?
 
     public var id: Int { stream_id }
     public var isRestricted: Bool { invite_only ?? false }

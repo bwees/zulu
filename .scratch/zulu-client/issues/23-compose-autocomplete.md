@@ -1,7 +1,7 @@
 # Compose autocomplete, and the whole emoji set
 
 Type: prototype
-Status: open
+Status: resolved
 Blocked by: 10
 
 ## Question
@@ -70,3 +70,38 @@ before the ranking is written.
 Left undetermined: emoji **categories** have no documented API; the only server-side grouping
 lives in a file Zulip's build scripts call internal. A picker with category tabs would have to
 carry its own grouping.
+
+## Answer — built
+
+Two new targets. `ZuluEmoji` holds the catalogue: the server's unicode table (fetched
+unauthenticated with ETag revalidation), realm custom emoji, and the synthesized `:zulip:`,
+merged and ranked by flutter's nine-bucket table. `ZuluCompose` holds the autocomplete
+abstraction — a source owns its trigger character, what it accepts as a query, and what may
+precede it; the engine owns the backward scan, the ranking, and the text replacement. Adding
+a fourth source touches no shared code.
+
+The picker and `:` autocomplete are the same catalogue and the same ranking, which is what
+made "realm custom emoji first" fall out for free rather than being a special case.
+
+139 tests, including the escaping fallback parameterised over every character that cannot
+appear in `#**...**`, trigger detection against emoticons and `::` and mid-word cases, and
+emoji-code normalisation across ZWJ sequences, keycaps, and flags.
+
+Verified live: 220 realm emoji, 15 user groups, and 533 subscription rows synced from the
+real account.
+
+Two corrections to the research, both found by writing the code:
+
+- §10.1 says a mid-word trigger never counts. Only half true — web's allowed preceding set
+  includes `/`, so `http://x/#frag` does open the channel box.
+- §11.4 says flutter skips a realm emoji named `zulip`, which contradicts §5.1's server
+  order. The server was followed: a realm emoji named `zulip` wins and the synthesized one
+  is dropped.
+
+Not built: **topic autocomplete.** `#**channel>topic` is a two-stage trigger that does not
+fit the single-character source model. The markup and its escaping are written and tested;
+wiring it needs a fourth source plus a trigger change.
+
+Also note `include_subscribers` is now `true` on register, which is what makes
+"subscription first" real when ranking people. If that payload becomes a problem on a large
+realm, dropping it degrades people-ranking to recency-then-alphabetical rather than breaking it.

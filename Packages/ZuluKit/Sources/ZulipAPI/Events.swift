@@ -8,6 +8,13 @@ public struct RegisterResponse: Decodable, Sendable {
     public let realm_users: [ZulipUser]?
     public let max_message_length: Int?
     public let unread_msgs: UnreadMessages?
+    /// Where the unicode emoji table is served, added at feature level 140. A static
+    /// file on the server's own origin, so it is fetched without credentials.
+    public let server_emoji_data_url: String?
+    /// Keyed by stringified emoji id. `:zulip:` is never in here and has to be
+    /// synthesized by the client.
+    public let realm_emoji: [String: RealmEmoji]?
+    public let realm_user_groups: [RealmUserGroup]?
 }
 
 /// Only the events Zulu acts on today. Anything else decodes to `.other` and is skipped,
@@ -20,6 +27,10 @@ public enum ZulipEvent: Sendable {
     case reaction(added: Bool, messageID: Int, reaction: Reaction)
     case submessage(Submessage)
     case subscriptionsChanged
+    /// The realm's whole emoji map, which is how the legacy event reports any change to
+    /// any one of them.
+    case realmEmojiChanged([String: RealmEmoji])
+    case userGroupsChanged
     case heartbeat
     case other(String)
 
@@ -32,6 +43,8 @@ public enum ZulipEvent: Sendable {
         case .reaction: "reaction"
         case .submessage: "submessage"
         case .subscriptionsChanged: "subscription"
+        case .realmEmojiChanged: "realm_emoji"
+        case .userGroupsChanged: "user_group"
         case .heartbeat: "heartbeat"
         case .other(let name): name
         }
@@ -56,6 +69,7 @@ struct EventEnvelope: Decodable {
     let sender_id: Int?
     let msg_type: String?
     let content: String?
+    let realm_emoji: [String: RealmEmoji]?
 
     func decoded() -> ZulipEvent {
         switch type {
@@ -91,6 +105,12 @@ struct EventEnvelope: Decodable {
             }
         case "subscription", "stream":
             return .subscriptionsChanged
+        case "realm_emoji":
+            // Without the `individual_emoji_changes` capability the server only ever
+            // sends the whole map, so there is nothing finer to handle.
+            if let realm_emoji { return .realmEmojiChanged(realm_emoji) }
+        case "user_group":
+            return .userGroupsChanged
         case "heartbeat":
             return .heartbeat
         default:
@@ -114,6 +134,7 @@ extension ZulipClient {
     public func register(eventTypes: [String] = [
         "message", "update_message", "delete_message", "update_message_flags",
         "reaction", "submessage", "subscription", "stream", "realm_user", "user_topic",
+        "realm_emoji", "user_group",
     ]) async throws -> RegisterResponse {
         try await send(.post, "register", parameters: [
             "apply_markdown": "true",
@@ -121,10 +142,14 @@ extension ZulipClient {
             "slim_presence": "true",
             "event_types": Self.json(eventTypes),
             // unread_msgs is only included when both of these are fetched.
-            "fetch_event_types": Self.json(
-                ["subscription", "realm_user", "realm", "message", "update_message_flags"]
-            ),
-            "include_subscribers": "false",
+            // `realm` is also what carries server_emoji_data_url.
+            "fetch_event_types": Self.json([
+                "subscription", "realm_user", "realm", "message", "update_message_flags",
+                "realm_emoji", "realm_user_groups",
+            ]),
+            // Subscriber lists are what let the `@` box put the people in this channel
+            // first, which is the ranking rule both official clients agree on.
+            "include_subscribers": "true",
         ])
     }
 

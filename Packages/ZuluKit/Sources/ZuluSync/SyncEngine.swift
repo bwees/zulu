@@ -1,5 +1,6 @@
 import Foundation
 import ZulipAPI
+import ZuluEmoji
 import ZuluStore
 
 public enum SyncStatus: Sendable, Equatable {
@@ -95,6 +96,13 @@ public actor SyncEngine {
 
         if let subscriptions = registration.subscriptions {
             try store.replaceChannels(subscriptions)
+            try store.replaceSubscribers(subscriptions)
+        }
+        if let emoji = registration.realm_emoji {
+            try store.replaceRealmEmoji(emoji)
+        }
+        if let groups = registration.realm_user_groups {
+            try store.replaceUserGroups(groups, selfUserID: selfUserID)
         }
         if let unread = registration.unread_msgs {
             try store.replaceUnread(unread, selfUserID: selfUserID)
@@ -104,6 +112,9 @@ public actor SyncEngine {
         }
         try store.saveSyncState(queueID: queueID, lastEventID: lastEventID)
         setStatus(.live)
+
+        let emojiDataURL = registration.server_emoji_data_url
+        Task { [weak self] in await self?.loadServerEmojiData(from: emojiDataURL) }
 
         await refreshTopics()
         await loadRecentDirectMessages()
@@ -150,6 +161,15 @@ public actor SyncEngine {
             case .subscriptionsChanged:
                 if let subscriptions = try? await client.subscriptions() {
                     try store.replaceChannels(subscriptions)
+                    try store.replaceSubscribers(subscriptions)
+                }
+
+            case .realmEmojiChanged(let emoji):
+                try store.replaceRealmEmoji(emoji)
+
+            case .userGroupsChanged:
+                if let groups = try? await client.userGroups() {
+                    try store.replaceUserGroups(groups, selfUserID: selfUserID)
                 }
 
             case .flags, .heartbeat, .other:
@@ -160,6 +180,31 @@ public actor SyncEngine {
 }
 
 extension SyncEngine {
+    /// Fetches the server's unicode emoji table, if it is not already cached.
+    ///
+    /// Nothing waits on this. The table is not needed to render a message — only to
+    /// search emoji — and it cannot change without a server restart, so it is fetched
+    /// after the queue is up and the picker simply shows the realm's own emoji until it
+    /// lands. The URL may point off the realm entirely when static files are on a CDN,
+    /// which is why the request carries no credentials.
+    func loadServerEmojiData(from path: String?) async {
+        guard let path, let url = URL(string: path, relativeTo: client.realmURL)?.absoluteURL else {
+            return
+        }
+        let cached = try? store.cachedServerEmojiData()
+        // A new URL means a new content hash, so the cached body is already stale and
+        // its ETag would only tell the server about a file that no longer exists.
+        let etag = cached?.url == url.absoluteString ? cached?.etag : nil
+
+        guard let fetched = try? await ServerEmojiDataFetch.fetch(
+            from: url, etag: etag, userAgent: ZulipClient.userAgent
+        ) else { return }
+
+        guard let data = fetched.data else { return }
+        guard let json = try? JSONEncoder().encode(data) else { return }
+        try? store.saveServerEmojiData(url: url.absoluteString, etag: fetched.etag, json: json)
+    }
+
     /// DM conversations are derived from the messages themselves — there is no endpoint
     /// that lists them. Without this initial fetch the DM list stays empty forever,
     /// because a conversation has to be listed before it can be opened and loaded.

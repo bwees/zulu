@@ -1,4 +1,3 @@
-import GRDB
 import SwiftUI
 import ZuluStore
 
@@ -13,31 +12,17 @@ struct ConversationView: View {
     let source: Source
     @Environment(AppModel.self) private var model
 
-    @State private var messages: [MessageRecord] = []
-    @State private var scrollPosition = ScrollPosition(idType: Int.self)
+    @State private var loader: MessageHistoryLoader?
     @State private var readTracker: ReadTracker?
-
-    /// The list stays hidden until the first page is in hand. Rendering an empty list and
-    /// then animating it to the bottom as messages trickle in is the jank; waiting costs a
-    /// moment of spinner and arrives already in the right place.
-    @State private var ready = false
-    /// Set a beat after the first render. Until then, arriving messages must not animate.
-    @State private var settled = false
-
+    /// The message SwiftUI keeps pinned across data changes. Never written during a
+    /// prepend — that is precisely what makes older messages arrive without a jump.
+    @State private var anchoredMessageID: Int?
     @State private var atBottom = true
-    @State private var moreHistoryExists = true
-    @State private var loadingOlder = false
-    /// Snapshotted when the conversation opens, so the divider does not vanish the moment
-    /// the messages behind it are marked read.
-    @State private var firstUnreadID: Int?
-
-    /// Five minutes, matching what Discord and Slack settle on.
-    private static let groupingWindow = 5 * 60
 
     var body: some View {
         Group {
-            if ready {
-                conversation
+            if let loader, loader.isReady {
+                conversation(loader)
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -58,55 +43,71 @@ struct ConversationView: View {
             }
         }
         .task(id: source) {
+            let loader = MessageHistoryLoader(source: source, model: model)
+            self.loader = loader
             readTracker = ReadTracker { ids in await model.markRead(ids) }
-            await load()
+            await loader.start()
         }
-        .onDisappear { Task { await readTracker?.flushNow() } }
+        .onDisappear {
+            loader?.stop()
+            Task { await readTracker?.flushNow() }
+        }
     }
 
-    private var conversation: some View {
+    private func conversation(_ loader: MessageHistoryLoader) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if loadingOlder {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 12)
+                // Outside the ForEach and deliberately unidentified: a row that appears and
+                // disappears inside the stack changes its subview count, which is one of the
+                // documented causes of lazy-stack jank.
+                if loader.isLoadingOlder {
+                    ProgressView().frame(maxWidth: .infinity).frame(height: 44)
                 }
-                ForEach(grouped, id: \.message.id) { entry in
-                    if entry.message.id == firstUnreadID {
-                        UnreadDivider().padding(.top, 10)
+
+                ForEach(loader.grouped) { entry in
+                    // One child per message, always. Yielding nothing for some rows would
+                    // change the stack's shape as the data moves.
+                    VStack(alignment: .leading, spacing: 0) {
+                        if entry.message.id == loader.firstUnreadID {
+                            UnreadDivider().padding(.top, 10)
+                        }
+                        MessageRow(message: entry.message, startsGroup: entry.startsGroup)
+                            .padding(.top, entry.startsGroup ? 14 : 2)
                     }
-                    MessageRow(message: entry.message, startsGroup: entry.startsGroup)
-                        .padding(.top, entry.startsGroup ? 14 : 2)
-                        .onAppear { readTracker?.sawMessage(id: entry.message.id) }
-                        .id(entry.message.id)
+                    .onAppear { readTracker?.sawMessage(id: entry.message.id) }
+                    .id(entry.message.id)
                 }
             }
+            .scrollTargetLayout()
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(DisablesScrollToTop().frame(width: 0, height: 0))
         }
+        // Anchoring by item identity is what keeps the view still while older messages are
+        // prepended. Correcting the offset after the fact — the previous approach — fights
+        // this mechanism instead of using it.
+        .scrollPosition(id: $anchoredMessageID, anchor: .top)
         .defaultScrollAnchor(.bottom)
-        .scrollPosition($scrollPosition, anchor: .bottom)
         .scrollEdgeEffectStyle(.soft, for: .bottom)
-        .onScrollGeometryChange(for: ScrollEdges.self) { geometry in
+        .onScrollPhaseChange { _, phase in loader.noteScrollPhase(phase) }
+        .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
+            loader.noteVisible(visible)
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
             let fromBottom = geometry.contentSize.height
                 - (geometry.contentOffset.y + geometry.containerSize.height)
-            return ScrollEdges(
-                nearTop: geometry.contentOffset.y < geometry.containerSize.height,
-                nearBottom: fromBottom < 120
-            )
-        } action: { _, edges in
-            atBottom = edges.nearBottom
-            // Only a scroll the reader actually performed should pull in history. Without
-            // that guard the keyboard appearing, or the list growing, fetches another page.
-            guard edges.nearTop, settled, scrollPosition.isPositionedByUser else { return }
-            Task { await loadOlder() }
+            return fromBottom < 120
+        } action: { _, isNearBottom in
+            atBottom = isNearBottom
         }
         .overlay(alignment: .bottomTrailing) {
             if !atBottom {
                 Button {
-                    // Going through ScrollPosition rather than a ScrollViewReader means this
-                    // wins against an inertial scroll still in flight.
-                    withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+                    // ScrollPosition holds the anchor, so going through it wins against an
+                    // inertial scroll still in flight.
+                    // Moving the anchor to the newest message is the same mechanism that
+                    // holds position, so it wins against an inertial scroll in flight.
+                    withAnimation(.snappy) { anchoredMessageID = loader.messages.last?.id }
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(.body.weight(.semibold))
@@ -120,29 +121,6 @@ struct ConversationView: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: atBottom)
-        .onChange(of: messages.last?.id) { _, _ in
-            guard settled, atBottom else { return }
-            withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) }
-        }
-    }
-
-    private struct ScrollEdges: Equatable {
-        let nearTop: Bool
-        let nearBottom: Bool
-    }
-
-    /// Consecutive messages from one person collapse under a single header, the way every
-    /// chat client does it. A long enough pause starts a new group even for the same sender,
-    /// so a conversation picked up hours later does not read as one block.
-    private var grouped: [(message: MessageRecord, startsGroup: Bool)] {
-        var previous: MessageRecord?
-        return messages.map { message in
-            defer { previous = message }
-            guard let previous, message.id != firstUnreadID else { return (message, true) }
-            let sameSender = previous.senderID == message.senderID
-            let closeInTime = message.timestamp - previous.timestamp < Self.groupingWindow
-            return (message, !(sameSender && closeInTime))
-        }
     }
 
     private var title: String {
@@ -157,60 +135,6 @@ struct ConversationView: View {
         case .topic(_, let name, _): "Message \(name.isEmpty ? "general chat" : name)"
         case .dm(let key): "Message \(model.title(forDM: key))"
         }
-    }
-
-    private func load() async {
-        ready = false
-        settled = false
-        moreHistoryExists = true
-
-        guard let writer = model.databaseWriter, let store = model.storeForReading else { return }
-        let observation: ValueObservation<ValueReducers.Fetch<[MessageRecord]>>
-        switch source {
-        case .topic(let channelID, let name, _):
-            observation = store.observeMessages(channelID: channelID, topic: name)
-            await model.loadHistory(channelID: channelID, topic: name)
-        case .dm(let key):
-            observation = store.observeMessages(dmKey: key)
-            await model.loadHistory(dmKey: key)
-        }
-
-        do {
-            var isFirstBatch = true
-            for try await rows in observation.values(in: writer) {
-                messages = rows
-                if isFirstBatch {
-                    firstUnreadID = rows.first { !$0.isRead }?.id
-                    isFirstBatch = false
-                    ready = true
-                    // One turn of the run loop is enough for the list to lay out at the
-                    // bottom; animating anything before that is what makes opening a
-                    // channel look like it is still loading.
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(250))
-                        settled = true
-                    }
-                }
-            }
-        } catch {
-            // Observation ends when the view goes away; nothing to recover.
-        }
-    }
-
-    private func loadOlder() async {
-        guard moreHistoryExists, !loadingOlder, let oldest = messages.first?.id else { return }
-        loadingOlder = true
-        defer { loadingOlder = false }
-
-        moreHistoryExists = switch source {
-        case .topic(let channelID, let name, _):
-            await model.loadOlder(channelID: channelID, topic: name, before: oldest)
-        case .dm(let key):
-            await model.loadOlder(dmKey: key, before: oldest)
-        }
-        // Prepended messages push everything down, so the message that was on screen is
-        // pinned back where it was.
-        scrollPosition.scrollTo(id: oldest, anchor: .top)
     }
 }
 

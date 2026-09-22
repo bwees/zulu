@@ -112,8 +112,8 @@ struct BlockView: View {
                 }
             }
 
-        case .image(let source, let link, let alt):
-            RemoteImage(path: source, fullSize: link, alt: alt)
+        case .image(let source, let link, let alt, let aspectRatio):
+            RemoteImage(path: source, fullSize: link, alt: alt, aspectRatio: aspectRatio)
 
         case .quotedReply(let author, _, let quoted):
             QuotedReplyView(author: author, quoted: quoted, emoji: emoji)
@@ -214,7 +214,7 @@ private struct QuotedReplyView: View {
             case .paragraph(let spans):
                 let text = spans.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty { return text }
-            case .image(_, _, let alt):
+            case .image(_, _, let alt, _):
                 return alt ?? "Image"
             case .codeBlock(_, let code):
                 return code

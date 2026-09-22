@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
+import ZuluCompose
 
 /// The compose bar owns its own draft.
 ///
@@ -21,6 +22,7 @@ struct ComposerBar: View {
     @State private var showEmoji = false
     @State private var attachment: AttachmentSource?
     @State private var pickedPhotos: [PhotosPickerItem] = []
+    @State private var autocomplete: ComposeAutocompleteController?
     @FocusState private var focused: Bool
 
     /// Every icon control in the bar is the same circle, so the row reads as one piece.
@@ -28,6 +30,11 @@ struct ComposerBar: View {
 
     var body: some View {
         VStack(spacing: 6) {
+            if let autocomplete, autocomplete.isOpen {
+                AutocompleteBox(suggestions: autocomplete.suggestions) { suggestion in
+                    draft = autocomplete.apply(suggestion, to: draft)
+                }
+            }
             if let sendError {
                 Text(sendError).font(.caption).foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -71,7 +78,19 @@ struct ComposerBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .sheet(isPresented: $showEmoji) { EmojiPicker { draft.append($0) } }
+        .task(id: source) {
+            EmojiCatalogueLoader.shared.start(store: model.storeForReading)
+            let controller = ComposeAutocompleteController(model: model, source: source)
+            await controller.prepare()
+            autocomplete = controller
+        }
+        // The emoji table arrives well after the conversation opens, so the sources are
+        // rebuilt when it lands rather than waiting for it up front.
+        .task(id: EmojiCatalogueLoader.shared.catalogue.candidates.count) {
+            await autocomplete?.prepare()
+        }
+        .onChange(of: draft) { autocomplete?.update(draft: draft) }
+        .sheet(isPresented: $showEmoji) { EmojiPicker { insert($0) } }
         .photosPicker(
             isPresented: binding(for: .photos), selection: $pickedPhotos,
             maxSelectionCount: 5, matching: .any(of: [.images, .videos])
@@ -115,6 +134,14 @@ struct ComposerBar: View {
             .padding(.bottom, 5)
         }
         .glassEffect(.regular, in: .capsule)
+    }
+
+    /// The picker hands back a shortcode rather than a character, because the server
+    /// resolves the name against the realm's own emoji when it renders. The space keeps
+    /// it from running into the word before it.
+    private func insert(_ shortcode: String) {
+        if let last = draft.last, last != " ", last != "\n" { draft += " " }
+        draft += shortcode
     }
 
     private func send() async {

@@ -30,7 +30,9 @@ extension ZulipClient {
     }
 
     public func subscriptions() async throws -> [Subscription] {
-        let response: SubscriptionsResponse = try await send(.get, "users/me/subscriptions")
+        let response: SubscriptionsResponse = try await send(
+            .get, "users/me/subscriptions", parameters: ["include_subscribers": "true"]
+        )
         return response.subscriptions
     }
 
@@ -88,6 +90,14 @@ extension ZulipClient {
             "msg_type": msgType,
             "content": content,
         ])
+    }
+
+    /// Re-reads the realm's groups. The `user_group` event says a group changed but not
+    /// how, and there are seven ops of it, so the list is simply refetched.
+    public func userGroups() async throws -> [RealmUserGroup] {
+        struct Response: Decodable { let user_groups: [RealmUserGroup] }
+        let response: Response = try await send(.get, "user_groups")
+        return response.user_groups
     }
 
     public func markAllRead() async throws {

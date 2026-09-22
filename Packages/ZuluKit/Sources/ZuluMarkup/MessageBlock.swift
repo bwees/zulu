@@ -38,7 +38,9 @@ public enum MessageBlock: Sendable, Equatable, Identifiable {
     case bulletList([[InlineSpan]])
     case numberedList([[InlineSpan]])
     /// `source` is the image to display, `link` the full-size target behind it.
-    case image(source: String, link: String?, alt: String?)
+    /// `aspectRatio` is width over height where the server told us, so a row can
+    /// reserve its height before the bytes arrive and the list never reflows.
+    case image(source: String, link: String?, alt: String?, aspectRatio: Double? = nil)
     /// Zulip's quote-and-reply: an attribution line followed by a blockquote. Kept as one
     /// thing so it can be drawn as a compact reply header rather than a wall of quote.
     case quotedReply(author: String, messageID: Int?, quoted: [MessageBlock])
@@ -50,7 +52,7 @@ public enum MessageBlock: Sendable, Equatable, Identifiable {
         case .codeBlock(let language, let code): "c:\(language ?? "")\(code.prefix(40))"
         case .bulletList(let items): "ul:" + items.flatMap { $0 }.map(\.text).joined()
         case .numberedList(let items): "ol:" + items.flatMap { $0 }.map(\.text).joined()
-        case .image(let source, _, _): "img:\(source)"
+        case .image(let source, _, _, _): "img:\(source)"
         case .quotedReply(let author, let messageID, _): "reply:\(author):\(messageID ?? 0)"
         }
     }
@@ -152,7 +154,10 @@ public enum MessageMarkup {
                 case "img":
                     flushPending()
                     if let source = element.attribute("src") {
-                        blocks.append(.image(source: source, link: nil, alt: element.attribute("alt")))
+                        blocks.append(.image(
+                        source: source, link: nil, alt: element.attribute("alt"),
+                        aspectRatio: Self.aspectRatio(from: element)
+                    ))
                     }
 
                 case "div":
@@ -211,7 +216,8 @@ public enum MessageMarkup {
                         source: source,
                         // The thumbnail is what loads; the original is what a tap opens.
                         link: element.attribute("data-original-src"),
-                        alt: element.attribute("alt")
+                        alt: element.attribute("alt"),
+                        aspectRatio: Self.aspectRatio(from: element)
                     ))
                 }
                 continue
@@ -226,12 +232,15 @@ public enum MessageMarkup {
         for node in nodes {
             guard case .element(let element) = node else { continue }
             if element.name == "img", let source = element.attribute("src") {
-                return .image(source: source, link: nil, alt: element.attribute("title"))
+                return .image(
+                    source: source, link: nil, alt: element.attribute("title"),
+                    aspectRatio: Self.aspectRatio(from: element)
+                )
             }
             if element.name == "a", let href = element.attribute("href"),
-               case .image(let source, _, let alt)? = firstImage(in: element.children) {
+               case .image(let source, _, let alt, let ratio)? = firstImage(in: element.children) {
                 // The caption sits on the anchor, not the thumbnail.
-                return .image(source: source, link: href, alt: element.attribute("title") ?? alt)
+                return .image(source: source, link: href, alt: element.attribute("title") ?? alt, aspectRatio: ratio)
             }
             if let nested = firstImage(in: element.children) { return nested }
         }
@@ -376,5 +385,20 @@ public enum MessageMarkup {
             }
         }
         return spans
+    }
+}
+
+extension MessageMarkup {
+    /// Zulip sends the original's size as `data-original-dimensions="1206x2140"`. Knowing it
+    /// up front is what lets a message reserve the right height before the image loads,
+    /// instead of growing under the reader's thumb mid-scroll.
+    static func aspectRatio(from element: HTMLNode.Element) -> Double? {
+        guard let raw = element.attribute("data-original-dimensions") else { return nil }
+        let parts = raw.lowercased().split(separator: "x")
+        guard parts.count == 2,
+              let width = Double(parts[0]), let height = Double(parts[1]),
+              width > 0, height > 0
+        else { return nil }
+        return width / height
     }
 }
