@@ -32,18 +32,28 @@ struct MessageReactionsRow: View {
             ) }
         } label: {
             HStack(spacing: 4) {
-                EmojiDisplayView(display: Self.display(of: group), size: 15)
+                EmojiDisplayView(display: Self.display(of: group), size: 14)
                 Text("\(group.count)")
                     .font(.caption2.weight(.semibold))
                     .monospacedDigit()
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                group.includesSelf ? AnyShapeStyle(Color.accentColor.opacity(0.22))
+                                   : AnyShapeStyle(.quaternary),
+                in: Capsule()
+            )
+            .overlay {
+                if group.includesSelf {
+                    Capsule().strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1)
+                }
+            }
             .contentShape(.capsule)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.capsule)
-        .tint(group.includesSelf ? Color.accentColor : nil)
+        // Plain and small: a glass capsule per reaction turned a row of chips into
+        // a row of buttons competing with the message above them.
+        .buttonStyle(.plain)
         .onLongPressGesture { showingReactors = group }
         .popover(item: $showingReactors) { group in
             ReactorList(names: group.userIDs.map(model.name(forUser:)).sorted())
@@ -81,8 +91,10 @@ struct EmojiDisplayView: View {
         switch display {
         case .glyph(let glyph):
             Text(glyph).font(.system(size: size))
-        case .image(let url, let still):
-            imageView(path: still ?? url)
+        case .image(let url, _):
+            // The animated URL, not the still: an animated custom emoji that does
+            // not move is just a worse version of itself.
+            imageView(path: url)
         case .text(let fallback):
             Text(fallback)
                 .font(.system(size: size * 0.7))
@@ -94,13 +106,14 @@ struct EmojiDisplayView: View {
     @ViewBuilder
     private func imageView(path: String) -> some View {
         if let image {
-            Image(uiImage: image).resizable().scaledToFit().frame(width: size, height: size)
+            AnimatedImageView(image: image, size: size)
+                .frame(width: size, height: size)
         } else {
             Color.clear
                 .frame(width: size, height: size)
                 .task(id: path) {
                     guard let data = await model.imageData(at: path) else { return }
-                    image = UIImage(data: data)
+                    image = AnimatedImage.decode(data)
                 }
         }
     }
