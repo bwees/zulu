@@ -22,6 +22,10 @@ final class AppModel {
     enum Destination: Equatable, Hashable {
         case channel(Int)
         case dm(String)
+        /// A promoted topic is its own destination, not a topic pushed on top of its
+        /// channel. Routing it through the channel meant going back landed on that
+        /// channel's topic list — which is empty, because its topics are the promoted ones.
+        case promotedTopic(channelID: Int, topic: String, channelName: String)
     }
 
     private(set) var phase: Phase = .loading

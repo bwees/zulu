@@ -247,7 +247,7 @@ struct ShellView: View {
                                     topicBranch(under: channel)
                                 }
                             }
-                            .padding(.bottom, 10)
+                            .padding(.bottom, 6)
                         }
                         if visibleChannels.isEmpty {
                             Text(emptyListMessage)
@@ -304,12 +304,12 @@ struct ShellView: View {
         } label: {
             HStack(spacing: 7) {
                 ChannelIcon(
-                    isForum: channel.rendersAsForum, restricted: channel.isRestricted, size: 13
+                    isForum: channel.rendersAsForum, restricted: channel.isRestricted, size: 15
                 )
                 .foregroundStyle(.tertiary)
-                .frame(width: 20, alignment: .leading)
+                .frame(width: 22, alignment: .leading)
                 Text(channel.name)
-                    .font(.footnote.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(channel.unreadCount > 0 ? .primary : .secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -320,7 +320,7 @@ struct ShellView: View {
                 }
             }
             .padding(.horizontal, 8)
-            .frame(height: 30)
+            .frame(height: 34)
             .background(
                 model.destination == .channel(channel.id) ? Color(.tertiarySystemFill) : .clear,
                 in: RoundedRectangle(cornerRadius: 7)
@@ -362,8 +362,8 @@ struct ShellView: View {
                 Rectangle()
                     .fill(.quaternary)
                     .frame(width: 1)
-                    .padding(.leading, 17)
-                    .padding(.trailing, 11)
+                    .padding(.leading, 18)
+                    .padding(.trailing, 12)
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(topics) { topic in
@@ -388,7 +388,7 @@ struct ShellView: View {
         } label: {
             HStack(spacing: 6) {
                 Text(topic.name.isEmpty ? "general chat" : topic.name)
-                    .font(.footnote.weight(topic.unreadCount > 0 ? .medium : .regular))
+                    .font(.subheadline.weight(topic.unreadCount > 0 ? .medium : .regular))
                     .foregroundStyle(topic.unreadCount > 0 ? .primary : .secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -397,7 +397,7 @@ struct ShellView: View {
                 }
             }
             .padding(.horizontal, 8)
-            .frame(height: 26)
+            .frame(height: 32)
             .background(
                 isOpen ? Color(.tertiarySystemFill) : .clear,
                 in: RoundedRectangle(cornerRadius: 6)
@@ -414,36 +414,41 @@ struct ShellView: View {
 
     /// A topic lifted out of its channel to sit at channel level. It shows the channel
     /// it came from underneath, because the name alone rarely says where it lives.
+    /// A promoted topic gets exactly the row a channel gets. It is a channel as far
+    /// as the sidebar is concerned, and giving it its own treatment made the list
+    /// look like two lists stapled together.
     private func promotedRow(_ promoted: PromotedTopicSummary) -> some View {
-        Button {
-            model.destination = .channel(promoted.channelID)
-            path = [.topic(
-                channelID: promoted.channelID, name: promoted.topic,
-                channelName: promoted.channelName
-            )]
+        let destination = AppModel.Destination.promotedTopic(
+            channelID: promoted.channelID, topic: promoted.topic,
+            channelName: promoted.channelName
+        )
+        return Button {
+            model.destination = destination
+            path = []
             setOpen(false)
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "bubble.left.and.text.bubble.right.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.tint)
-                    .frame(width: 26, alignment: .leading)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(promoted.displayName)
-                        .font(.subheadline.weight(promoted.unreadCount > 0 ? .semibold : .regular))
-                        .lineLimit(1)
-                    Text(promoted.channelName)
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
+            HStack(spacing: 7) {
+                ChannelIcon(isForum: true, size: 15)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 22, alignment: .leading)
+                Text(promoted.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(promoted.unreadCount > 0 ? .primary : .secondary)
+                    .lineLimit(1)
                 Spacer(minLength: 4)
                 if promoted.mentionCount > 0 {
                     Badge(count: promoted.mentionCount, mention: true)
                 } else if promoted.unreadCount > 0 {
-                    Circle().fill(.primary).frame(width: 7, height: 7)
+                    Circle().fill(.primary).frame(width: 6, height: 6)
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .frame(height: 34)
+            .background(
+                model.destination == destination ? Color(.tertiarySystemFill) : .clear,
+                in: RoundedRectangle(cornerRadius: 7)
+            )
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -590,6 +595,10 @@ struct ShellView: View {
             } else {
                 EmptyStateView(text: "That channel is no longer available.")
             }
+        case .promotedTopic(let channelID, let topic, let channelName):
+            ConversationView(source: .topic(
+                channelID: channelID, name: topic, channelName: channelName
+            ))
         case .dm(let key):
             ConversationView(source: .dm(key: key))
         case nil:

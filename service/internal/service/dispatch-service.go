@@ -242,4 +242,3 @@ func DecisionInput(user domain.User, event zulip.MessageEvent, state *notify.Sta
 		State: state,
 	}
 }
-
