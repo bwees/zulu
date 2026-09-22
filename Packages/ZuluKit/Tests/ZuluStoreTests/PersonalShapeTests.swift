@@ -139,3 +139,108 @@ struct PersonalShapeTests {
         #expect(topics.count == 3)
     }
 }
+
+@MainActor
+struct HidingAndAbsorptionTests {
+
+    private func firstValue<T>(_ stream: AsyncValueObservation<T>) async throws -> T? {
+        for try await value in stream { return value }
+        return nil
+    }
+
+    private func makeStore(topics: [String]) throws -> ZuluStore {
+        let store = try ZuluStore(url: nil)
+        try store.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO channel (id, name, isRestricted, isMuted, pinned, detectedForum, hidden)
+                VALUES (7, 'engineering', 0, 0, 0, 1, 0)
+                """)
+            for (index, name) in topics.enumerated() {
+                try db.execute(
+                    sql: "INSERT INTO topic (channelID, name, maxMessageID) VALUES (7, ?, ?)",
+                    arguments: [name, 100 - index]
+                )
+            }
+        }
+        return store
+    }
+
+    private func visibleChannels(_ store: ZuluStore) async throws -> [ChannelSummary] {
+        try await firstValue(store.observeChannels().values(in: store.writer)) ?? []
+    }
+
+    /// Promoting the last topic leaves nothing beneath the channel but its own promoted
+    /// topic one level up, so the channel steps aside.
+    @Test func promotingTheOnlyTopicAbsorbsTheChannel() async throws {
+        let store = try makeStore(topics: ["general chat"])
+        #expect(try await visibleChannels(store).count == 1)
+
+        try store.promote(topic: "general chat", inChannel: 7)
+        #expect(try await visibleChannels(store).isEmpty)
+    }
+
+    /// The channel comes back on its own, and the promotion is left alone.
+    @Test func aNewTopicBringsAnAbsorbedChannelBack() async throws {
+        let store = try makeStore(topics: ["general chat"])
+        try store.promote(topic: "general chat", inChannel: 7)
+
+        try await store.writer.write { db in
+            try db.execute(
+                sql: "INSERT INTO topic (channelID, name, maxMessageID) VALUES (7, 'new thread', 200)"
+            )
+        }
+
+        #expect(try await visibleChannels(store).count == 1)
+        #expect(try store.isPromoted(topic: "general chat", inChannel: 7))
+    }
+
+    @Test func promotingSomeButNotAllTopicsLeavesTheChannel() async throws {
+        let store = try makeStore(topics: ["one", "two"])
+        try store.promote(topic: "one", inChannel: 7)
+        #expect(try await visibleChannels(store).count == 1)
+    }
+
+    /// A channel with no topics at all has not been absorbed by anything.
+    @Test func anEmptyChannelIsStillListed() async throws {
+        let store = try makeStore(topics: [])
+        #expect(try await visibleChannels(store).count == 1)
+    }
+
+    @Test func hidingRemovesAChannelFromTheList() async throws {
+        let store = try makeStore(topics: ["one"])
+        try store.setHidden(true, forChannel: 7)
+
+        #expect(try await visibleChannels(store).isEmpty)
+        let hidden = try await firstValue(store.observeHiddenChannels().values(in: store.writer)) ?? []
+        #expect(hidden.map(\.id) == [7])
+    }
+
+    @Test func unhidingPutsItBack() async throws {
+        let store = try makeStore(topics: ["one"])
+        try store.setHidden(true, forChannel: 7)
+        try store.setHidden(false, forChannel: 7)
+        #expect(try await visibleChannels(store).count == 1)
+    }
+
+    /// The alias is what makes a promoted `general chat` mean anything at the top level.
+    @Test func aPromotedTopicShowsItsOwnAlias() async throws {
+        let store = try makeStore(topics: ["general chat"])
+        try store.promote(topic: "general chat", inChannel: 7)
+        try store.setAlias("Off-topic", forPromotedTopic: "general chat", inChannel: 7)
+
+        let promoted = try await firstValue(
+            store.observePromotedTopics(inGroup: nil).values(in: store.writer)
+        ) ?? []
+        #expect(promoted.first?.displayName == "Off-topic")
+    }
+
+    @Test func aPromotedTopicWithoutAnAliasShowsItsTopic() async throws {
+        let store = try makeStore(topics: ["standup"])
+        try store.promote(topic: "standup", inChannel: 7)
+
+        let promoted = try await firstValue(
+            store.observePromotedTopics(inGroup: nil).values(in: store.writer)
+        ) ?? []
+        #expect(promoted.first?.displayName == "standup")
+    }
+}

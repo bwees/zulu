@@ -56,7 +56,8 @@ extension ZuluStore {
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
                   FROM channel c
-                 ORDER BY c.pinned DESC, c.name COLLATE NOCASE
+                 WHERE \(ChannelVisibility.clause)
+                 ORDER BY c.pinned DESC, name COLLATE NOCASE
                 """)
         }
     }

@@ -69,3 +69,29 @@ Team. Aliases and promotions belong in the same synced document when that exists
 
 Not built: **search does not yet match aliases** — it matches nothing yet, since search is
 unbuilt. When it lands it should match both the alias and the real name.
+
+## Second pass — hiding, absorption, topic aliases
+
+Settled in conversation and built:
+
+- **Promoting the last topic absorbs its channel.** A channel whose every topic is promoted
+  drops out of the list, because nothing would be left beneath it but its own promoted topic
+  one level up. It returns on its own the moment a new topic appears, and the promotion is
+  left alone.
+- **Hiding is local and nothing more.** A hidden channel is still subscribed, still notifies,
+  still counts its mentions. It simply does not take a row. Reachable and reversible from a
+  **Hidden Channels** screen in the list header menu.
+- **A hidden channel's unread stops feeding its group's dot, but its mentions still do.**
+  Otherwise hiding a noisy channel leaves a dot that can never be cleared; a direct mention
+  is addressed to you and outranks your filing.
+- **Promoted topics get their own alias**, which is the case that most needs one — promoting
+  `general chat` otherwise gives a top-level row whose name says nothing.
+- **The real name lives in the conversation header**, under the title, so a reference to it
+  from someone else is still recognisable.
+
+Eight more tests cover absorption, the channel's return, hiding and unhiding, and alias
+fallback.
+
+The channel list was restyled at the same time: channels read as headers, topics as their
+contents on a single quiet rule rather than an elbow per row, with tighter rows and real
+separation between one channel's block and the next.

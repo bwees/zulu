@@ -21,6 +21,8 @@ struct ShellView: View {
     @State private var renamingChannel: ChannelSummary?
     @State private var aliasDraft = ""
     @State private var promotedTask: Task<Void, Never>?
+    @State private var showingHidden = false
+    @State private var renamingPromoted: PromotedTopicSummary?
     @State private var editingGroup: String?
     @State private var creatingGroup = false
     @State private var newGroupName = ""
@@ -208,17 +210,30 @@ struct ShellView: View {
 
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(listTitle).font(.headline).lineLimit(1)
-                Spacer()
+                Spacer(minLength: 4)
                 SyncDot(status: model.status)
+                Menu {
+                    Button("Hidden channels", systemImage: "eye.slash") { showingHidden = true }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                // Channels are headers with their topics hanging under them, so the gap
+                // between one channel's group and the next has to be bigger than the gap
+                // inside one. At equal spacing the whole list reads as one flat run.
+                VStack(alignment: .leading, spacing: 0) {
                     if section == .dms {
                         ForEach(model.dms) { dm in dmRow(dm) }
                     } else {
@@ -226,10 +241,13 @@ struct ShellView: View {
                             promotedRow(promoted)
                         }
                         ForEach(visibleChannels) { channel in
-                            channelRow(channel)
-                            if channel.rendersAsForum {
-                                topicBranch(under: channel)
+                            VStack(alignment: .leading, spacing: 0) {
+                                channelRow(channel)
+                                if channel.rendersAsForum {
+                                    topicBranch(under: channel)
+                                }
                             }
+                            .padding(.bottom, 10)
                         }
                         if visibleChannels.isEmpty {
                             Text(emptyListMessage)
@@ -284,30 +302,35 @@ struct ShellView: View {
             path = []
             setOpen(false)
         } label: {
-            HStack(spacing: 8) {
-                ChannelIcon(isForum: channel.rendersAsForum, restricted: channel.isRestricted)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 26, alignment: .leading)
+            HStack(spacing: 7) {
+                ChannelIcon(
+                    isForum: channel.rendersAsForum, restricted: channel.isRestricted, size: 13
+                )
+                .foregroundStyle(.tertiary)
+                .frame(width: 20, alignment: .leading)
                 Text(channel.name)
-                    .font(.subheadline.weight(channel.unreadCount > 0 ? .semibold : .regular))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(channel.unreadCount > 0 ? .primary : .secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if channel.mentionCount > 0 {
                     Badge(count: channel.mentionCount, mention: true)
                 } else if channel.unreadCount > 0 {
-                    Circle().fill(.primary).frame(width: 7, height: 7)
+                    Circle().fill(.primary).frame(width: 6, height: 6)
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 7)
+            .frame(height: 30)
             .background(
                 model.destination == .channel(channel.id) ? Color(.tertiarySystemFill) : .clear,
-                in: RoundedRectangle(cornerRadius: 8)
+                in: RoundedRectangle(cornerRadius: 7)
             )
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button("Hide channel", systemImage: "eye.slash") {
+                model.setHidden(true, forChannel: channel.id)
+            }
             Button("Rename for me…", systemImage: "pencil") {
                 aliasDraft = model.alias(forChannel: channel.id) ?? ""
                 renamingChannel = channel
@@ -325,51 +348,26 @@ struct ShellView: View {
         }
     }
 
-    /// A forum channel's live conversations, hung under it on a bracket so a topic is one
-    /// tap away instead of two. Only the few most recent, or the sidebar becomes the
-    /// conversation list.
+    /// A forum channel's live conversations, hung under it so a topic is one tap away
+    /// instead of two. Only the few most recent, or the sidebar becomes the conversation
+    /// list.
+    ///
+    /// One quiet rule down the side rather than an elbow per row: at this density the
+    /// brackets drew more attention than the names they were pointing at.
     @ViewBuilder
     private func topicBranch(under channel: ChannelSummary) -> some View {
         let topics = model.recentTopics[channel.id] ?? []
         if !topics.isEmpty {
             HStack(alignment: .top, spacing: 0) {
-                TopicBracket(count: topics.count)
-                    .stroke(.tertiary, lineWidth: 1.5)
-                    .frame(width: 16)
-                    .padding(.leading, 16)
+                Rectangle()
+                    .fill(.quaternary)
+                    .frame(width: 1)
+                    .padding(.leading, 17)
+                    .padding(.trailing, 11)
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(topics) { topic in
-                        Button {
-                            model.destination = .channel(channel.id)
-                            path = [.topic(
-                                channelID: channel.id, name: topic.name, channelName: channel.name
-                            )]
-                            setOpen(false)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(topic.name.isEmpty ? "general chat" : topic.name)
-                                    .font(.footnote.weight(topic.unreadCount > 0 ? .semibold : .regular))
-                                    .foregroundStyle(topic.unreadCount > 0 ? .primary : .secondary)
-                                    .lineLimit(1)
-                                Spacer(minLength: 4)
-                                if topic.unreadCount > 0 {
-                                    Circle().fill(.primary).frame(width: 6, height: 6)
-                                }
-                            }
-                            .frame(height: Self.topicRowHeight)
-                            .padding(.horizontal, 8)
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Promote to sidebar", systemImage: "arrow.up.left") {
-                                model.promote(
-                                    topic: topic.name, inChannel: channel.id,
-                                    toGroup: currentGroupID
-                                )
-                            }
-                        }
+                        topicRow(topic, in: channel)
                     }
                 }
             }
@@ -377,30 +375,40 @@ struct ShellView: View {
         }
     }
 
-    private static let topicRowHeight: CGFloat = 26
-
-    /// The elbow bracket Discord draws beside nested threads.
-    private struct TopicBracket: Shape {
-        let count: Int
-
-        func path(in rect: CGRect) -> Path {
-            var path = Path()
-            let rowHeight = ShellView.topicRowHeight
-            let lastCentre = rowHeight * (CGFloat(count) - 0.5)
-            path.move(to: CGPoint(x: rect.minX, y: 0))
-            path.addLine(to: CGPoint(x: rect.minX, y: lastCentre - 6))
-            path.addQuadCurve(
-                to: CGPoint(x: rect.minX + 6, y: lastCentre),
-                control: CGPoint(x: rect.minX, y: lastCentre)
-            )
-            path.addLine(to: CGPoint(x: rect.maxX, y: lastCentre))
-
-            for index in 0..<max(count - 1, 0) {
-                let centre = rowHeight * (CGFloat(index) + 0.5)
-                path.move(to: CGPoint(x: rect.minX, y: centre))
-                path.addLine(to: CGPoint(x: rect.maxX, y: centre))
+    private func topicRow(_ topic: TopicSummary, in channel: ChannelSummary) -> some View {
+        let isOpen = path.contains(
+            .topic(channelID: channel.id, name: topic.name, channelName: channel.name)
+        )
+        return Button {
+            model.destination = .channel(channel.id)
+            path = [.topic(
+                channelID: channel.id, name: topic.name, channelName: channel.name
+            )]
+            setOpen(false)
+        } label: {
+            HStack(spacing: 6) {
+                Text(topic.name.isEmpty ? "general chat" : topic.name)
+                    .font(.footnote.weight(topic.unreadCount > 0 ? .medium : .regular))
+                    .foregroundStyle(topic.unreadCount > 0 ? .primary : .secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if topic.unreadCount > 0 {
+                    Circle().fill(.primary).frame(width: 5, height: 5)
+                }
             }
-            return path
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(
+                isOpen ? Color(.tertiarySystemFill) : .clear,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Promote to sidebar", systemImage: "arrow.up.left") {
+                model.promote(topic: topic.name, inChannel: channel.id, toGroup: currentGroupID)
+            }
         }
     }
 
@@ -439,6 +447,10 @@ struct ShellView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button("Rename for me…", systemImage: "pencil") {
+                aliasDraft = promoted.displayName
+                renamingPromoted = promoted
+            }
             Button("Remove from sidebar", systemImage: "arrow.down.right") {
                 model.demote(topic: promoted.topic, inChannel: promoted.channelID)
             }
@@ -497,9 +509,32 @@ struct ShellView: View {
                     }
                 }
         }
+        .sheet(isPresented: $showingHidden) { HiddenChannelsView() }
         .sheet(item: Binding(get: { editingGroup.map(Identified.init) },
                              set: { editingGroup = $0?.value })) { wrapper in
             GroupEditor(groupID: wrapper.value)
+        }
+        .alert(
+            "Rename for me",
+            isPresented: Binding(
+                get: { renamingPromoted != nil },
+                set: { if !$0 { renamingPromoted = nil } }
+            )
+        ) {
+            TextField("Name", text: $aliasDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Use real name", role: .destructive) {
+                if let p = renamingPromoted {
+                    model.setAlias(nil, forPromotedTopic: p.topic, inChannel: p.channelID)
+                }
+            }
+            Button("Save") {
+                if let p = renamingPromoted {
+                    model.setAlias(aliasDraft, forPromotedTopic: p.topic, inChannel: p.channelID)
+                }
+            }
+        } message: {
+            Text("Only you see this name.")
         }
         .alert(
             "Rename for me",

@@ -38,7 +38,10 @@ struct ConversationView: View {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
                         Text(title).font(.headline).lineLimit(1)
-                        Text("#\(channelName)").font(.caption2).foregroundStyle(.secondary)
+                        // The alias is what the sidebar shows; the real name lives here
+                        // so a reference to it elsewhere is still recognisable.
+                        Text(model.headerSubtitle(forChannel: channelName))
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }

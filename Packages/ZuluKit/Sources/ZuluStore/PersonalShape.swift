@@ -39,7 +39,10 @@ public struct PromotedTopicSummary: Decodable, FetchableRecord, Sendable, Identi
     public var mentionCount: Int
 
     public var id: String { "\(channelID)\u{1F}\(topic)" }
-    public var displayName: String { topic.isEmpty ? "general chat" : topic }
+    /// The name you gave it, or the topic itself. Promoting `general chat` out of a
+    /// channel gives a top-level row whose real name says nothing, which is exactly when
+    /// an alias earns its place.
+    public var displayName: String
 }
 
 extension ZuluStore {
@@ -143,6 +146,7 @@ extension ZuluStore {
         return ValueObservation.tracking { db in
             try PromotedTopicSummary.fetchAll(db, sql: """
                 SELECT p.channelID, p.topic, p.groupID,
+                       COALESCE(p.alias, NULLIF(p.topic, ''), 'general chat') AS displayName,
                        COALESCE(c.alias, c.name) AS channelName,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = p.channelID AND u.topic = p.topic) AS unreadCount,
@@ -165,4 +169,73 @@ extension ZuluStore {
             )
         }
     }
+}
+
+extension ZuluStore {
+
+    static func registerHidingMigration(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v9-hiding") { db in
+            try db.alter(table: "channel") { t in
+                // Hidden is this viewer's filing decision and nothing more: the channel is
+                // still subscribed, still notifies, and still counts its mentions.
+                t.add(column: "hidden", .boolean).notNull().defaults(to: false)
+            }
+            try db.alter(table: "promotedTopic") { t in
+                t.add(column: "alias", .text)
+            }
+        }
+    }
+
+    public func setHidden(_ hidden: Bool, forChannel id: Int) throws {
+        try writer.write { db in
+            try db.execute(
+                sql: "UPDATE channel SET hidden = ? WHERE id = ?", arguments: [hidden, id]
+            )
+        }
+    }
+
+    public func setAlias(_ alias: String?, forPromotedTopic topic: String, inChannel channelID: Int) throws {
+        let trimmed = alias?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try writer.write { db in
+            try db.execute(
+                sql: "UPDATE promotedTopic SET alias = ? WHERE channelID = ? AND topic = ?",
+                arguments: [(trimmed?.isEmpty ?? true) ? nil : trimmed, channelID, topic]
+            )
+        }
+    }
+
+    public func observeHiddenChannels()
+        -> ValueObservation<ValueReducers.Fetch<[ChannelSummary]>>
+    {
+        ValueObservation.tracking { db in
+            try ChannelSummary.fetchAll(db, sql: """
+                SELECT c.id, COALESCE(c.alias, c.name) AS name, c.isRestricted, c.isMuted,
+                       c.pinned, COALESCE(c.modeOverride, c.detectedForum) AS isForum,
+                       (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
+                       (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
+                  FROM channel c
+                 WHERE c.hidden = 1
+                 ORDER BY name COLLATE NOCASE
+                """)
+        }
+    }
+}
+
+/// The SQL fragment that decides whether a channel earns a row in the sidebar.
+///
+/// A channel drops out when it is hidden, and also when every topic it has is promoted —
+/// promoting the last one absorbs the channel, since there would be nothing left beneath
+/// it but its own promoted topic sitting one level up. It comes back on its own the moment
+/// someone starts a new topic, without disturbing the promotion.
+enum ChannelVisibility {
+    static let clause = """
+        c.hidden = 0
+          AND NOT (
+                (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) > 0
+            AND (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id)
+                = (SELECT COUNT(*) FROM promotedTopic p WHERE p.channelID = c.id)
+          )
+        """
 }

@@ -70,7 +70,12 @@ extension ZuluStore {
                 SELECT g.id, g.name, g.icon, g.position,
                        (SELECT COUNT(*) FROM channelGroupMember m WHERE m.groupID = g.id) AS channelCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID IN (SELECT channelID FROM channelGroupMember m
+                         JOIN channel hc ON hc.id = u.channelID
+                         -- A hidden channel keeps its mentions but stops contributing
+                         -- an unread dot, or hiding a noisy channel would leave a dot
+                         -- that can never be cleared.
+                         WHERE hc.hidden = 0
+                           AND u.channelID IN (SELECT channelID FROM channelGroupMember m
                                                 WHERE m.groupID = g.id)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.isMention = 1
@@ -102,6 +107,7 @@ extension ZuluStore {
                          WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
                   FROM channel c
                  WHERE \(membership)
+                   AND \(ChannelVisibility.clause)
                  ORDER BY c.pinned DESC, c.name COLLATE NOCASE
                 """, arguments: arguments)
         }

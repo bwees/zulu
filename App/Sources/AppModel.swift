@@ -511,3 +511,29 @@ extension AppModel {
         try? store?.setAlias(alias, forChannel: id)
     }
 }
+
+extension AppModel {
+    func setHidden(_ hidden: Bool, forChannel id: Int) {
+        try? store?.setHidden(hidden, forChannel: id)
+    }
+
+    var hiddenChannelObservation: ValueObservation<ValueReducers.Fetch<[ChannelSummary]>>? {
+        store?.observeHiddenChannels()
+    }
+
+    func setAlias(_ alias: String?, forPromotedTopic topic: String, inChannel channelID: Int) {
+        try? store?.setAlias(alias, forPromotedTopic: topic, inChannel: channelID)
+    }
+}
+
+extension AppModel {
+    /// What sits under a conversation's title. When a channel has been renamed locally the
+    /// server's own name goes here, since someone else referring to it will use that.
+    func headerSubtitle(forChannel displayName: String) -> String {
+        guard let channel = allChannels.first(where: { $0.name == displayName }),
+              let real = realName(forChannel: channel.id),
+              real != displayName
+        else { return "#\(displayName)" }
+        return "#\(displayName) · \(real)"
+    }
+}
