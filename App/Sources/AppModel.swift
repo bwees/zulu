@@ -4,6 +4,7 @@ import GRDB
 import Observation
 import SwiftUI
 import ZulipAPI
+import ZuluMarkup
 import ZuluStore
 import ZuluSync
 
@@ -539,5 +540,34 @@ extension AppModel {
               real != displayName
         else { return "#\(displayName)" }
         return "#\(displayName) · \(real)"
+    }
+}
+
+extension AppModel {
+    /// "You: …" or "Name: …", the way every chat client labels a conversation list.
+    /// The stored content is rendered HTML, so it is flattened to its first line of text —
+    /// an image-only message has none, and says so rather than showing an empty row.
+    func preview(forDM dm: DMSummary) -> String? {
+        guard let html = dm.lastContent else { return nil }
+
+        let speaker = dm.lastSenderID == account?.userID
+            ? "You"
+            : (dm.lastSender?.split(separator: " ").first.map(String.init) ?? "")
+
+        let body = MessageMarkup.blocks(from: html).lazy.compactMap { block -> String? in
+            switch block {
+            case .paragraph(let spans):
+                let text = spans.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                return text.isEmpty ? nil : text
+            case .image(_, _, let alt, _): return alt ?? "Image"
+            case .codeBlock(_, let code): return code
+            case .bulletList(let items), .numberedList(let items):
+                return items.first?.map(\.text).joined()
+            case .quote, .quotedReply: return nil
+            }
+        }.first
+
+        guard let body else { return speaker.isEmpty ? nil : "\(speaker): Image" }
+        return speaker.isEmpty ? body : "\(speaker): \(body)"
     }
 }

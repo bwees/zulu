@@ -37,6 +37,9 @@ public struct DMSummary: Decodable, FetchableRecord, Sendable, Identifiable, Equ
     public var unreadCount: Int
     public var lastMessageID: Int
     public var lastSender: String?
+    public var lastSenderID: Int?
+    /// Rendered HTML, flattened for display by the caller.
+    public var lastContent: String?
     public var lastTimestamp: Int?
 
     public var id: String { dmKey }
@@ -94,6 +97,10 @@ extension ZuluStore {
                        MAX(m.id) AS lastMessageID,
                        (SELECT s.senderName FROM message s WHERE s.dmKey = m.dmKey
                          ORDER BY s.id DESC LIMIT 1) AS lastSender,
+                       (SELECT s.senderID FROM message s WHERE s.dmKey = m.dmKey
+                         ORDER BY s.id DESC LIMIT 1) AS lastSenderID,
+                       (SELECT s.renderedContent FROM message s WHERE s.dmKey = m.dmKey
+                         ORDER BY s.id DESC LIMIT 1) AS lastContent,
                        (SELECT s.timestamp FROM message s WHERE s.dmKey = m.dmKey
                          ORDER BY s.id DESC LIMIT 1) AS lastTimestamp
                   FROM message m

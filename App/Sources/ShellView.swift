@@ -92,6 +92,10 @@ struct ShellView: View {
     private var drawer: some View {
         HStack(spacing: 0) {
             rail
+            Rectangle()
+                .fill(DrawerPalette.edge)
+                .frame(width: 1)
+                .ignoresSafeArea(edges: .vertical)
             list.frame(width: listW)
         }
         .frame(width: drawerW)
@@ -157,7 +161,7 @@ struct ShellView: View {
         .scrollClipDisabled()
         .scrollEdgeEffectStyle(.soft, for: .all)
         .frame(width: railW)
-        .background(Color(.secondarySystemGroupedBackground).ignoresSafeArea(edges: .vertical))
+        .background(DrawerPalette.rail.ignoresSafeArea(edges: .vertical))
     }
 
     /// Unread is a pill on the rail's edge; a count only appears when something actually
@@ -227,7 +231,7 @@ struct ShellView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            Divider()
+            .background(DrawerPalette.listHeader)
 
             ScrollView {
                 // Channels are headers with their topics hanging under them, so the gap
@@ -263,7 +267,7 @@ struct ShellView: View {
             }
             .refreshable { await model.refreshTopics() }
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea(edges: .vertical))
+        .background(DrawerPalette.list.ignoresSafeArea(edges: .vertical))
         .task(id: section) { await observeChannels() }
     }
 
@@ -481,20 +485,28 @@ struct ShellView: View {
             path = []
             setOpen(false)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 9) {
                 SenderAvatar(
                     name: model.title(forDM: dm.dmKey),
                     userID: model.soleParticipant(inDM: dm.dmKey),
-                    size: 28
+                    size: 34
                 )
-                Text(model.title(forDM: dm.dmKey))
-                    .font(.subheadline.weight(dm.unreadCount > 0 ? .semibold : .regular))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.title(forDM: dm.dmKey))
+                        .font(.subheadline.weight(dm.unreadCount > 0 ? .semibold : .regular))
+                        .lineLimit(1)
+                    if let preview = model.preview(forDM: dm) {
+                        Text(preview)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 4)
                 Badge(count: dm.unreadCount, mention: true)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
             .background(
                 model.destination == .dm(dm.dmKey) ? Color(.tertiarySystemFill) : .clear,
                 in: RoundedRectangle(cornerRadius: 8)
