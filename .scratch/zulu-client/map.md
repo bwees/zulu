@@ -14,7 +14,7 @@ A handoff-ready implementation spec for **Zulu**: a SwiftUI client for iOS and m
 
 **Fixed decisions from charting** — these are settled, do not reopen:
 
-- **v1 feature scope** — daily-driver core: read/send, channels + topics, DMs, reactions, replies/quotes, file and image upload/view, markdown compose, unread and mark-read, notification controls, search, auth (SSO + password). Out: polls, todo widgets, drafts sync, scheduled send, edit-history UI, admin/org settings.
+- **v1 feature scope** — daily-driver core: read/send, channels + topics, DMs, reactions, replies/quotes, file and image upload/view, markdown compose, unread and mark-read, notification controls, search, auth (SSO + password). Out: drafts sync, scheduled send, edit-history UI, admin/org settings. Polls were originally out and are now in — see [Polls](issues/22-poll-support.md).
 - **Single realm in v1.** One Zulip organization signed in at a time. The data model should not foreclose multi-realm later, but no multi-realm UI.
 - **"Servers" are user-defined channel groups**, created and named by the user, client-side, synced across the user's devices via iCloud. Not Zulip realms.
 - **Channel render mode is auto-detected** — forum (topic list) vs flat chat — with a per-channel user override that syncs via iCloud alongside groups.
@@ -44,6 +44,8 @@ is worth notifying about.
 - [APNs from a Go service, multi-device](issues/04-apns-for-go-senders.md) — `apns-collapse-id` gives notifications a predictable identity for cross-device dismissal; there is no delete API, so foreground reconciliation is the backstop. `sideshow/apns2` is the only real library and is dormant.
 - [Zulip message content model](issues/05-zulip-message-model.md) — render the server's `rendered_content` HTML natively; never re-parse markdown. The topic field is `subject` on the wire.
 - [iPhone navigation shell](issues/06-iphone-navigation.md) — the Discord-style drawer shell wins over a native tab bar and a flat topic inbox. Three levels deep at most; DMs are a rail entry.
+- [Local store schema and sync model](issues/11-local-store-schema.md) — settled by building it: GRDB, six tables, DM conversations derived from a participant key rather than a table. Fetch-gap tracking and retention are still missing.
+- [Swift package layout and module boundaries](issues/17-package-layout.md) — settled by building it: `ZulipAPI`, `ZuluMarkup`, `ZuluStore`, `ZuluSync`, with GRDB stopping at the store.
 
 ## Not yet specified
 
@@ -77,3 +79,6 @@ is worth notifying about.
 ### Paid back
 
 - **Message rendering is now native.** `ZuluMarkup` parses Zulip's `rendered_content` into blocks and the app lays them out: paragraphs with inline styling, quotes, code blocks, lists, uploaded images, realm custom emoji, and mentions. The `NSAttributedString` HTML importer is gone. 18 tests cover it, several written from HTML captured off zulip.futo.org.
+
+- **Message rendering paid back further.** Quote-and-reply is recognised as its own block and drawn as a compact Discord-style reply line, and uploads now work from the composer. Polls remain unrendered — they ride the `submessages` protocol, not markdown, and are now [their own ticket](issues/22-poll-support.md).
+- **Read state is still crude.** Opening a conversation marks everything in it read, whether or not it was seen. [Read and unread state](issues/12-read-state-model.md) is where that gets fixed.

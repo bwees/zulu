@@ -1,4 +1,6 @@
 import GRDB
+import PhotosUI
+import UniformTypeIdentifiers
 import SwiftUI
 import ZuluStore
 
@@ -18,6 +20,9 @@ struct ConversationView: View {
     @State private var sendError: String?
     @State private var sending = false
     @State private var showEmoji = false
+    @State private var attachment: AttachmentSource?
+    @State private var pickedPhotos: [PhotosPickerItem] = []
+    @State private var uploading = false
     @State private var atBottom = true
     /// Snapshotted when the conversation opens, so the divider does not vanish the
     /// moment the messages behind it are marked read.
@@ -91,6 +96,18 @@ struct ConversationView: View {
                 }
             }
         }
+        .photosPicker(isPresented: binding(for: .photos), selection: $pickedPhotos, maxSelectionCount: 5, matching: .any(of: [.images, .videos]))
+        .task(id: pickedPhotos.count) { await uploadPickedPhotos() }
+        .fileImporter(isPresented: binding(for: .files), allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { Task { await upload(urls: urls) } }
+        }
+        .fullScreenCover(isPresented: binding(for: .camera)) {
+            CameraPicker { data in
+                guard let data else { return }
+                Task { await upload(data: data, filename: "photo.jpg", contentType: "image/jpeg") }
+            }
+            .ignoresSafeArea()
+        }
         .sheet(isPresented: $showEmoji) {
             EmojiPicker { draft.append($0) }
         }
@@ -118,20 +135,37 @@ struct ConversationView: View {
         }
     }
 
+    /// Discord's shape: attachments on a plus outside the field, emoji tucked inside it,
+    /// send on the far side. Every icon control is the same circle.
     private var composer: some View {
         VStack(spacing: 6) {
             if let sendError {
                 Text(sendError).font(.caption).foregroundStyle(.red)
             }
-            HStack(spacing: 8) {
-                circleButton("face.smiling") { showEmoji = true }
+            if uploading {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Uploading…").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-                TextField(placeholder, text: $draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .glassEffect(.regular, in: .capsule)
+            HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button("Photo Library", systemImage: "photo.on.rectangle") { attachment = .photos }
+                    Button("Choose Files", systemImage: "folder") { attachment = .files }
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Take Photo", systemImage: "camera") { attachment = .camera }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(width: Self.controlSize, height: Self.controlSize)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+
+                field
 
                 Button {
                     Task { await send() }
@@ -149,18 +183,31 @@ struct ConversationView: View {
         .padding(.vertical, 8)
     }
 
-    /// Every icon control in the bar is the same circle, so the row reads as one piece.
-    private static let controlSize: CGFloat = 26
+    private var field: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            TextField(placeholder, text: $draft, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.plain)
+                .padding(.leading, 14)
+                .padding(.vertical, 9)
 
-    private func circleButton(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.body)
-                .frame(width: Self.controlSize, height: Self.controlSize)
+            Button {
+                showEmoji = true
+            } label: {
+                Image(systemName: "face.smiling")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: Self.controlSize, height: Self.controlSize)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 7)
+            .padding(.bottom, 5)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .glassEffect(.regular, in: .capsule)
     }
+
+    private static let controlSize: CGFloat = 26
 
     private var placeholder: String {
         switch source {
@@ -286,5 +333,55 @@ struct Avatar: View {
                     .font(.system(size: size * 0.45, weight: .semibold))
                     .foregroundStyle(.white)
             )
+    }
+}
+
+// MARK: - Attachments
+
+extension ConversationView {
+
+    fileprivate func binding(for wanted: AttachmentSource) -> Binding<Bool> {
+        Binding(
+            get: { attachment == wanted },
+            set: { if !$0, attachment == wanted { attachment = nil } }
+        )
+    }
+
+    fileprivate func uploadPickedPhotos() async {
+        guard !pickedPhotos.isEmpty else { return }
+        let items = pickedPhotos
+        pickedPhotos = []
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let type = item.supportedContentTypes.first ?? .data
+            let name = "\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "dat")"
+            await upload(data: data, filename: name, contentType: type.preferredMIME)
+        }
+    }
+
+    fileprivate func upload(urls: [URL]) async {
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let type = UTType(filenameExtension: url.pathExtension) ?? .data
+            await upload(data: data, filename: url.lastPathComponent, contentType: type.preferredMIME)
+        }
+    }
+
+    /// Zulip uploads first and embeds the result as ordinary markdown, so an attachment
+    /// lands in the draft as a link the person can still edit or caption before sending.
+    fileprivate func upload(data: Data, filename: String, contentType: String) async {
+        uploading = true
+        sendError = nil
+        defer { uploading = false }
+
+        switch await model.upload(data, filename: filename, contentType: contentType) {
+        case .success(let markdown):
+            if !draft.isEmpty, !draft.hasSuffix("\n") { draft += "\n" }
+            draft += markdown + "\n"
+        case .failure(let message):
+            sendError = message
+        }
     }
 }

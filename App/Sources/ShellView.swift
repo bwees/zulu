@@ -85,17 +85,22 @@ struct ShellView: View {
     private var rail: some View {
         ScrollView {
             VStack(spacing: 12) {
-                railButton(systemImage: "bubble.left.and.bubble.right.fill",
-                           active: section == .dms,
-                           badge: model.dms.reduce(0) { $0 + $1.unreadCount }) {
-                    section = .dms
-                }
+                railButton(
+                    systemImage: "bubble.left.and.bubble.right.fill",
+                    active: section == .dms,
+                    unread: model.dms.contains { $0.unreadCount > 0 },
+                    // Every direct message is addressed to you, so each unread one counts.
+                    mentions: model.dms.reduce(0) { $0 + $1.unreadCount }
+                ) { section = .dms }
+
                 Divider().frame(width: 28)
-                railButton(systemImage: "number",
-                           active: section == .channels,
-                           badge: model.channels.reduce(0) { $0 + $1.unreadCount }) {
-                    section = .channels
-                }
+
+                railButton(
+                    systemImage: "number",
+                    active: section == .channels,
+                    unread: model.channels.contains { $0.unreadCount > 0 },
+                    mentions: model.channels.reduce(0) { $0 + $1.mentionCount }
+                ) { section = .channels }
             }
             .padding(.vertical, 12)
         }
@@ -104,21 +109,45 @@ struct ShellView: View {
         .background(Color(.secondarySystemGroupedBackground).ignoresSafeArea(edges: .vertical))
     }
 
+    /// Unread is a pill on the rail's edge; a count only appears when something actually
+    /// needs an answer. A number for every unread message turns the rail into noise.
     private func railButton(
-        systemImage: String, active: Bool, badge: Int, action: @escaping () -> Void
+        systemImage: String,
+        active: Bool,
+        unread: Bool,
+        mentions: Int,
+        action: @escaping () -> Void
     ) -> some View {
         let shape = RoundedRectangle(cornerRadius: active ? 14 : 23)
         return Button(action: action) {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                    .frame(width: 46, height: 46)
-                    .glassEffect(.regular.tint(active ? .accentColor : nil).interactive(), in: shape)
-                Badge(count: badge).offset(x: 6, y: -4)
-            }
+            Image(systemName: systemImage)
+                .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .frame(width: 46, height: 46)
+                .glassEffect(.regular.tint(active ? .accentColor : nil).interactive(), in: shape)
+                .overlay(alignment: .bottomTrailing) {
+                    if mentions > 0 {
+                        Text(mentions > 99 ? "99+" : "\(mentions)")
+                            .font(.caption2.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.red, in: Capsule())
+                            .overlay(Capsule().stroke(Color(.secondarySystemGroupedBackground), lineWidth: 2))
+                            .fixedSize()
+                            .offset(x: 4, y: 3)
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(.primary)
+                        .frame(width: 4, height: active ? 26 : (unread ? 10 : 0))
+                        .offset(x: -15)
+                }
         }
         .buttonStyle(.plain)
         .animation(.snappy, value: active)
+        .animation(.snappy, value: unread)
     }
 
     private var list: some View {
@@ -169,8 +198,11 @@ struct ShellView: View {
                     .foregroundStyle(channel.unreadCount > 0 ? .primary : .secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Badge(count: channel.mentionCount, mention: true)
-                if channel.mentionCount == 0 { Badge(count: channel.unreadCount) }
+                if channel.mentionCount > 0 {
+                    Badge(count: channel.mentionCount, mention: true)
+                } else if channel.unreadCount > 0 {
+                    Circle().fill(.primary).frame(width: 7, height: 7)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)

@@ -49,12 +49,13 @@ struct MessageBody: View {
         case .paragraph(let spans): spans
         case .bulletList(let items), .numberedList(let items): items.flatMap { $0 }
         case .quote(let inner): inner.flatMap(spans(in:))
+        case .quotedReply(_, _, let quoted): quoted.flatMap(spans(in:))
         case .codeBlock, .image: []
         }
     }
 }
 
-private struct BlockView: View {
+struct BlockView: View {
     let block: MessageBlock
     let emoji: [String: Image]
 
@@ -113,6 +114,9 @@ private struct BlockView: View {
 
         case .image(let source, let link, let alt):
             RemoteImage(path: source, fullSize: link, alt: alt)
+
+        case .quotedReply(let author, _, let quoted):
+            QuotedReplyView(author: author, quoted: quoted, emoji: emoji)
         }
     }
 
@@ -153,4 +157,73 @@ private struct BlockView: View {
 /// The realm the app is signed into, so relative links and image paths can resolve.
 enum RealmContext {
     @MainActor static var realmURL: URL?
+}
+
+/// A reply, drawn the way Discord draws one: a single compact line above the message
+/// naming who is being answered and showing a taste of what they said. Tapping expands
+/// it, because a one-line preview is not always enough to follow the thread.
+private struct QuotedReplyView: View {
+    let author: String
+    let quoted: [MessageBlock]
+    let emoji: [String: Image]
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Avatar(name: author, size: 16)
+                    Text(author)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if !expanded {
+                        Text(preview)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                HStack(alignment: .top, spacing: 8) {
+                    Capsule().fill(.tertiary).frame(width: 3)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(quoted) { BlockView(block: $0, emoji: emoji) }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// The first line of what was quoted, with images named rather than drawn.
+    private var preview: String {
+        for block in quoted {
+            switch block {
+            case .paragraph(let spans):
+                let text = spans.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+            case .image(_, _, let alt):
+                return alt ?? "Image"
+            case .codeBlock(_, let code):
+                return code
+            case .bulletList(let items), .numberedList(let items):
+                if let first = items.first { return first.map(\.text).joined() }
+            case .quote, .quotedReply:
+                continue
+            }
+        }
+        return ""
+    }
 }

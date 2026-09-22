@@ -306,3 +306,20 @@ extension AppModel {
 
     private static let imageCache = ImageCache()
 }
+
+extension AppModel {
+    enum UploadOutcome {
+        case success(String)
+        case failure(String)
+    }
+
+    func upload(_ data: Data, filename: String, contentType: String) async -> UploadOutcome {
+        guard let client else { return .failure("Not signed in.") }
+        do {
+            let file = try await client.upload(data, filename: filename, contentType: contentType)
+            return .success(file.markdown(isImage: contentType.hasPrefix("image/")))
+        } catch {
+            return .failure(Self.describe(error))
+        }
+    }
+}

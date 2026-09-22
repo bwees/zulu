@@ -159,3 +159,58 @@ struct RealWorldMarkupTests {
         }
     }
 }
+
+struct QuotedReplyTests {
+
+    /// The shape Zulip's quote-and-reply produces, captured from zulip.futo.org.
+    @Test func attributionAndQuoteFoldIntoOneReply() {
+        let html = ##"<p><span class="user-mention silent" data-user-id="2323">Brandon Wees</span> <a href="#narrow/channel/108-immich-off-topic/topic//near/498801">said</a>:</p><blockquote><p>the original words</p></blockquote><p>Thanks</p>"##
+        let blocks = MessageMarkup.blocks(from: html)
+        #expect(blocks == [
+            .quotedReply(
+                author: "Brandon Wees",
+                messageID: 498801,
+                quoted: [.paragraph([InlineSpan(text: "the original words")])]
+            ),
+            .paragraph([InlineSpan(text: "Thanks")]),
+        ])
+    }
+
+    /// A quote the person typed themselves has no attribution line, so it stays a quote.
+    @Test func plainBlockquoteIsNotAReply() {
+        let html = "<blockquote><p>just quoting</p></blockquote><p>my point</p>"
+        #expect(MessageMarkup.blocks(from: html) == [
+            .quote([.paragraph([InlineSpan(text: "just quoting")])]),
+            .paragraph([InlineSpan(text: "my point")]),
+        ])
+    }
+
+    /// Prose that mentions someone and links a message is not an attribution line.
+    @Test func mentionFollowedByQuoteIsNotAReplyUnlessItEndsWithAColon() {
+        let html = ##"<p><span class="user-mention" data-user-id="9">Ana</span> look at <a href="#narrow/channel/1/near/5">this</a> please</p><blockquote><p>x</p></blockquote>"##
+        let blocks = MessageMarkup.blocks(from: html)
+        #expect(blocks.count == 2)
+        if case .quotedReply = blocks[0] {
+            Issue.record("ordinary prose should not be folded into a reply")
+        }
+    }
+
+    @Test func replyWithoutANearLinkIsNotFolded() {
+        let html = ##"<p><span class="user-mention" data-user-id="9">Ana</span> said:</p><blockquote><p>x</p></blockquote>"##
+        let blocks = MessageMarkup.blocks(from: html)
+        if case .quotedReply = blocks.first {
+            Issue.record("an attribution with no message link should not be folded")
+        }
+    }
+
+    @Test func replyKeepsImagesInsideTheQuotedPart() {
+        let html = ##"<p><span class="user-mention silent" data-user-id="1">B</span> <a href="#narrow/channel/1/near/42">said</a>:</p><blockquote><p><img alt="x.png" class="inline-image" src="/user_uploads/thumbnail/x.png"></p></blockquote>"##
+        let blocks = MessageMarkup.blocks(from: html)
+        guard case .quotedReply(_, let id, let quoted) = blocks.first else {
+            Issue.record("expected a quoted reply")
+            return
+        }
+        #expect(id == 42)
+        #expect(quoted == [.image(source: "/user_uploads/thumbnail/x.png", link: nil, alt: "x.png")])
+    }
+}

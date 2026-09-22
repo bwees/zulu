@@ -39,6 +39,9 @@ public enum MessageBlock: Sendable, Equatable, Identifiable {
     case numberedList([[InlineSpan]])
     /// `source` is the image to display, `link` the full-size target behind it.
     case image(source: String, link: String?, alt: String?)
+    /// Zulip's quote-and-reply: an attribution line followed by a blockquote. Kept as one
+    /// thing so it can be drawn as a compact reply header rather than a wall of quote.
+    case quotedReply(author: String, messageID: Int?, quoted: [MessageBlock])
 
     public var id: String {
         switch self {
@@ -48,6 +51,7 @@ public enum MessageBlock: Sendable, Equatable, Identifiable {
         case .bulletList(let items): "ul:" + items.flatMap { $0 }.map(\.text).joined()
         case .numberedList(let items): "ol:" + items.flatMap { $0 }.map(\.text).joined()
         case .image(let source, _, _): "img:\(source)"
+        case .quotedReply(let author, let messageID, _): "reply:\(author):\(messageID ?? 0)"
         }
     }
 }
@@ -61,7 +65,45 @@ public enum MessageMarkup {
     public static func blocks(from html: String) -> [MessageBlock] {
         var blocks: [MessageBlock] = []
         collect(HTMLParser.parse(html), into: &blocks)
-        return blocks
+        return foldQuotedReplies(blocks)
+    }
+
+    /// Zulip renders quote-and-reply as an attribution paragraph — a silent mention,
+    /// a `said` link carrying `/near/<id>` — immediately followed by a blockquote.
+    /// Recognising the pair lets the UI draw a one-line reply header instead of
+    /// repeating the whole quoted message inline.
+    private static func foldQuotedReplies(_ blocks: [MessageBlock]) -> [MessageBlock] {
+        var output: [MessageBlock] = []
+        var index = 0
+        while index < blocks.count {
+            if case .paragraph(let spans) = blocks[index],
+               index + 1 < blocks.count,
+               case .quote(let quoted) = blocks[index + 1],
+               let attribution = attribution(from: spans) {
+                output.append(.quotedReply(
+                    author: attribution.author,
+                    messageID: attribution.messageID,
+                    quoted: quoted
+                ))
+                index += 2
+                continue
+            }
+            output.append(blocks[index])
+            index += 1
+        }
+        return output
+    }
+
+    private static func attribution(from spans: [InlineSpan]) -> (author: String, messageID: Int?)? {
+        guard let mention = spans.first(where: \.mention) else { return nil }
+        guard let link = spans.compactMap(\.link).first(where: { $0.contains("/near/") })
+        else { return nil }
+        // Nothing but the attribution may be in the line, or it is ordinary prose
+        // that happens to quote someone.
+        let text = spans.map(\.text).joined().trimmingCharacters(in: .whitespaces)
+        guard text.hasSuffix(":") else { return nil }
+        let id = link.split(separator: "/").last.flatMap { Int($0) }
+        return (mention.text.trimmingCharacters(in: .whitespaces), id)
     }
 
     private static func collect(_ nodes: [HTMLNode], into blocks: inout [MessageBlock]) {
