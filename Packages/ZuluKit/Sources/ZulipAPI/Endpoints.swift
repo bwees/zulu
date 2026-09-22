@@ -76,6 +76,20 @@ extension ZulipClient {
         return response.id
     }
 
+    /// Appends one event to a message's widget log — a vote, a new option, a new question.
+    ///
+    /// The route is real and both official mobile clients use it, but it is absent from
+    /// Zulip's OpenAPI spec and the subsystem is documented as experimental, so it carries
+    /// no stability promise.
+    public func sendSubmessage(messageID: Int, content: String, msgType: String = "widget") async throws {
+        struct Empty: Decodable {}
+        let _: Empty = try await send(.post, "submessage", parameters: [
+            "message_id": String(messageID),
+            "msg_type": msgType,
+            "content": content,
+        ])
+    }
+
     public func markAllRead() async throws {
         struct Empty: Decodable {}
         let _: Empty = try await send(.post, "mark_all_as_read")

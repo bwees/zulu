@@ -143,20 +143,21 @@ struct RealWorldMarkupTests {
         ])])
     }
 
+    /// An image inside a quoted reply survives the fold into `.quotedReply`.
     @Test func quotedReplyKeepsItsImageInsideTheQuote() {
         let html = ##"<p><span class="user-mention silent" data-user-id="2323">Brandon Wees</span> <a href="#narrow/channel/108/near/498801">said</a>:</p><blockquote><p><img alt="x.png" class="inline-image" src="/user_uploads/thumbnail/x.png/840x560.webp"></p></blockquote><p>Thanks</p>"##
         let blocks = MessageMarkup.blocks(from: html)
-        #expect(blocks.count == 3)
-        if case .quote(let inner) = blocks[1] {
-            #expect(inner.count == 1)
-            if case .image(let source, _, _) = inner[0] {
-                #expect(source == "/user_uploads/thumbnail/x.png/840x560.webp")
-            } else {
-                Issue.record("the quote should hold an image block")
-            }
-        } else {
-            Issue.record("expected a quote block")
+        #expect(blocks.count == 2)
+        guard case .quotedReply(let author, let messageID, let quoted) = blocks.first else {
+            Issue.record("expected the attribution and quote to fold into a reply")
+            return
         }
+        #expect(author == "Brandon Wees")
+        #expect(messageID == 498801)
+        #expect(quoted == [.image(
+            source: "/user_uploads/thumbnail/x.png/840x560.webp", link: nil, alt: "x.png"
+        )])
+        #expect(blocks.last == .paragraph([InlineSpan(text: "Thanks")]))
     }
 }
 

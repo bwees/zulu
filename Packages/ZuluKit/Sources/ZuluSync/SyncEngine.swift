@@ -143,6 +143,9 @@ public actor SyncEngine {
             case .reaction(let added, let messageID, let reaction):
                 try store.setReaction(reaction, onMessage: messageID, added: added)
 
+            case .submessage(let submessage):
+                try store.apply(submessage)
+
             case .subscriptionsChanged:
                 if let subscriptions = try? await client.subscriptions() {
                     try store.replaceChannels(subscriptions)

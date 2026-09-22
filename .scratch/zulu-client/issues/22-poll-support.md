@@ -1,7 +1,7 @@
 # Polls
 
 Type: grilling
-Status: open
+Status: resolved
 Blocked by: 11
 
 ## Question
@@ -60,3 +60,26 @@ order. The server never tallies a vote — the client does.
 
 What is left to decide is the storage shape (the log is per-message state that changes
 independently of the message) and what voting feels like on a phone.
+
+## Answer — built
+
+`ZuluPolls` is a separate target holding the whole protocol as pure, testable code: a
+submessage log replays into a `Poll`. The server never tallies anything, so the fold is the
+feature.
+
+- **Storage**: a `submessage` table keyed on the submessage's own id, so re-applying an event
+  is a no-op. `message.isWidget` is cached at save time so the body-or-poll decision costs no
+  query and cannot flicker.
+- **Rendering**: `MessageContent` picks between `PollView` and `MessageBody`. A widget
+  message never renders `renderedContent` — the server leaves the literal `/poll` text there.
+- **Voting** is optimistic, then reconciled by the `submessage` event coming back.
+- 23 tests on the replay: vote and unvote, multi-select, duplicate option text from both
+  sources, canned options, id order versus array order, malformed JSON, unknown event types,
+  a non-author trying to edit the question, and todo/zform falling to `.unsupported`.
+
+Verified against a real poll on zulip.futo.org: options, counts, and voter names all render.
+
+Deliberately not built: **creating** a poll (the protocol side is free — send a message
+starting with `/poll` — but it needs compose UI), and editing the question (the model and the
+author check exist; there is no UI). `MAX_IDX = 1000` is not clamped client-side, so an
+over-long poll surfaces the server's 400 as the poll's error line.

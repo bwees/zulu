@@ -250,7 +250,7 @@ struct MessageRow: View {
                         }
                     }
                 }
-                MessageBody(html: message.renderedContent)
+                MessageContent(message: message)
             }
         }
     }

@@ -124,6 +124,26 @@ public final class ZuluStore: Sendable {
             try db.create(index: "groupMember_channel", on: "channelGroupMember", columns: ["channelID"])
         }
 
+        migrator.registerMigration("v4-polls") { db in
+            // A poll is an append-only log, so this is the record and any tally derived from
+            // it is a cache. The primary key on the submessage's own id makes applying the
+            // same event twice a no-op, which happens routinely: once from GET /messages,
+            // once from the event queue.
+            try db.create(table: "submessage") { t in
+                t.primaryKey("id", .integer)
+                t.column("messageID", .integer).notNull()
+                    .references("message", onDelete: .cascade)
+                t.column("senderID", .integer).notNull()
+                t.column("msgType", .text).notNull()
+                t.column("content", .text).notNull()
+            }
+            try db.create(index: "submessage_message", on: "submessage", columns: ["messageID"])
+
+            try db.alter(table: "message") { t in
+                t.add(column: "isWidget", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         return migrator
     }
 
@@ -171,6 +191,11 @@ public final class ZuluStore: Sendable {
         for reaction in message.reactions {
             try ReactionRecord(messageID: message.id, reaction: reaction).save(db)
         }
+        // Saved rather than replaced: the fetched array and the event queue each carry part
+        // of the log, and a refetch must not undo an event that arrived while it was in flight.
+        for submessage in message.submessages ?? [] {
+            try SubmessageRecord(from: submessage).save(db)
+        }
         // A DM's participants are the only place some users appear, so they are learned here.
         for participant in message.dmParticipants where try UserRecord.fetchOne(db, key: participant.id) == nil {
             try UserRecord(id: participant.id, fullName: participant.full_name, email: participant.email).save(db)
@@ -205,7 +230,9 @@ public final class ZuluStore: Sendable {
 
     public func clearAll() throws {
         try writer.write { db in
-            for table in ["reaction", "message", "topic", "channel", "user", "syncState", "unread"] {
+            for table in [
+                "submessage", "reaction", "message", "topic", "channel", "user", "syncState", "unread",
+            ] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }

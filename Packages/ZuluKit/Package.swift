@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "ZulipAPI", targets: ["ZulipAPI"]),
         .library(name: "ZuluMarkup", targets: ["ZuluMarkup"]),
+        .library(name: "ZuluPolls", targets: ["ZuluPolls"]),
         .library(name: "ZuluStore", targets: ["ZuluStore"]),
         .library(name: "ZuluSync", targets: ["ZuluSync"]),
     ],
@@ -16,6 +17,7 @@ let package = Package(
     targets: [
         .target(name: "ZulipAPI"),
         .target(name: "ZuluMarkup"),
+        .target(name: "ZuluPolls"),
         .target(name: "ZuluStore", dependencies: [
             "ZulipAPI",
             .product(name: "GRDB", package: "GRDB.swift"),
@@ -23,5 +25,6 @@ let package = Package(
         .target(name: "ZuluSync", dependencies: ["ZulipAPI", "ZuluStore"]),
         .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore"]),
         .testTarget(name: "ZuluMarkupTests", dependencies: ["ZuluMarkup"]),
+        .testTarget(name: "ZuluPollsTests", dependencies: ["ZuluPolls"]),
     ]
 )

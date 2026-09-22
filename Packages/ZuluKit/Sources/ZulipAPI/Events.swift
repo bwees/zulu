@@ -18,6 +18,7 @@ public enum ZulipEvent: Sendable {
     case deleteMessage(ids: [Int])
     case flags(operation: String, flag: String, messageIDs: [Int])
     case reaction(added: Bool, messageID: Int, reaction: Reaction)
+    case submessage(Submessage)
     case subscriptionsChanged
     case heartbeat
     case other(String)
@@ -29,6 +30,7 @@ public enum ZulipEvent: Sendable {
         case .deleteMessage: "delete_message"
         case .flags: "update_message_flags"
         case .reaction: "reaction"
+        case .submessage: "submessage"
         case .subscriptionsChanged: "subscription"
         case .heartbeat: "heartbeat"
         case .other(let name): name
@@ -50,6 +52,10 @@ struct EventEnvelope: Decodable {
     let emoji_code: String?
     let reaction_type: String?
     let user_id: Int?
+    let submessage_id: Int?
+    let sender_id: Int?
+    let msg_type: String?
+    let content: String?
 
     func decoded() -> ZulipEvent {
         switch type {
@@ -71,6 +77,17 @@ struct EventEnvelope: Decodable {
                     messageID: messageID,
                     reaction: Reaction(emoji_name: name, emoji_code: code, reaction_type: kind, user_id: user)
                 )
+            }
+        case "submessage":
+            // The event calls the submessage's own id `submessage_id` and reserves `id` for
+            // the event queue. A message's `submessages` array calls the same value `id`,
+            // so the two are reconciled here rather than anywhere downstream.
+            if let submessageID = submessage_id, let messageID = message_id,
+               let sender = sender_id, let kind = msg_type, let content {
+                return .submessage(Submessage(
+                    id: submessageID, message_id: messageID, sender_id: sender,
+                    msg_type: kind, content: content
+                ))
             }
         case "subscription", "stream":
             return .subscriptionsChanged
@@ -96,7 +113,7 @@ extension ZulipClient {
 
     public func register(eventTypes: [String] = [
         "message", "update_message", "delete_message", "update_message_flags",
-        "reaction", "subscription", "stream", "realm_user", "user_topic",
+        "reaction", "submessage", "subscription", "stream", "realm_user", "user_topic",
     ]) async throws -> RegisterResponse {
         try await send(.post, "register", parameters: [
             "apply_markdown": "true",

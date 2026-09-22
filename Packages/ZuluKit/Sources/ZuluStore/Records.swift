@@ -57,6 +57,10 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var isRead: Bool
     public var isMentioned: Bool
     public var editedAt: Int?
+    /// Whether the message carries a widget, which decides between drawing the poll and
+    /// drawing the body. Kept on the message so the choice costs no query, and set once at
+    /// save time because editing the text never re-derives the widget.
+    public var isWidget: Bool
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
 
@@ -72,7 +76,8 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         timestamp: Int,
         isRead: Bool = false,
         isMentioned: Bool = false,
-        editedAt: Int? = nil
+        editedAt: Int? = nil,
+        isWidget: Bool = false
     ) {
         self.id = id
         self.channelID = channelID
@@ -86,6 +91,7 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.isRead = isRead
         self.isMentioned = isMentioned
         self.editedAt = editedAt
+        self.isWidget = isWidget
     }
 
     public init(from message: ZulipMessage, selfUserID: Int) {
@@ -98,6 +104,7 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         isRead = message.isRead
         isMentioned = message.isMentioned
         editedAt = message.last_edit_timestamp
+        isWidget = message.hasWidget
 
         if message.isChannelMessage {
             channelID = message.stream_id

@@ -10,6 +10,26 @@ public struct Reaction: Decodable, Sendable, Equatable, Hashable {
     public var groupingKey: String { "\(reaction_type):\(emoji_code)" }
 }
 
+/// One entry in a message's widget log. `content` is a JSON document carried as a string,
+/// and its schema depends on where in the log the entry sits: the lowest id declares the
+/// widget, everything after it is an event.
+public struct Submessage: Decodable, Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let message_id: Int
+    /// Whoever added this entry, not necessarily the message's sender.
+    public let sender_id: Int
+    public let msg_type: String
+    public let content: String
+
+    public init(id: Int, message_id: Int, sender_id: Int, msg_type: String, content: String) {
+        self.id = id
+        self.message_id = message_id
+        self.sender_id = sender_id
+        self.msg_type = msg_type
+        self.content = content
+    }
+}
+
 public struct DisplayRecipient: Decodable, Sendable, Equatable {
     public let id: Int
     public let email: String?
@@ -34,11 +54,17 @@ public struct ZulipMessage: Decodable, Sendable, Equatable, Identifiable {
     public let reactions: [Reaction]
     public let flags: [String]?
     public let last_edit_timestamp: Int?
+    /// Present on both `GET /messages` and the `message` event, so a poll never needs a
+    /// fetch of its own. Optional because the field is documented as experimental.
+    public let submessages: [Submessage]?
 
     /// A channel name for channel messages, the participant list for DMs.
     public let display_recipient: DisplayRecipientField?
 
     public var isChannelMessage: Bool { type == "stream" }
+    /// The server leaves the raw `/poll` text in `content` and renders it as an ordinary
+    /// paragraph, so a message carrying a widget has to be drawn from the log instead.
+    public var hasWidget: Bool { submessages?.contains { $0.msg_type == "widget" } ?? false }
     public var isRead: Bool { flags?.contains("read") ?? false }
     public var isMentioned: Bool {
         guard let flags else { return false }
