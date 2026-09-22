@@ -49,10 +49,9 @@ extension ZuluStore {
             try ChannelSummary.fetchAll(db, sql: """
                 SELECT c.id, c.name, c.isRestricted, c.isMuted, c.pinned,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
-                       (SELECT COUNT(*) FROM message m
-                         WHERE m.channelID = c.id AND m.isRead = 0) AS unreadCount,
-                       (SELECT COUNT(*) FROM message m
-                         WHERE m.channelID = c.id AND m.isRead = 0 AND m.isMentioned = 1) AS mentionCount
+                       (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
                   FROM channel c
                  ORDER BY c.pinned DESC, c.name COLLATE NOCASE
                 """)
@@ -63,8 +62,8 @@ extension ZuluStore {
         ValueObservation.tracking { db in
             try TopicSummary.fetchAll(db, sql: """
                 SELECT t.channelID, t.name, t.maxMessageID,
-                       (SELECT COUNT(*) FROM message m
-                         WHERE m.channelID = t.channelID AND m.topic = t.name AND m.isRead = 0) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = t.channelID AND u.topic = t.name) AS unreadCount,
                        (SELECT m.senderName FROM message m
                          WHERE m.channelID = t.channelID AND m.topic = t.name
                          ORDER BY m.id DESC LIMIT 1) AS lastSender,
@@ -82,7 +81,7 @@ extension ZuluStore {
         ValueObservation.tracking { db in
             try DMSummary.fetchAll(db, sql: """
                 SELECT m.dmKey,
-                       SUM(CASE WHEN m.isRead = 0 THEN 1 ELSE 0 END) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u WHERE u.dmKey = m.dmKey) AS unreadCount,
                        MAX(m.id) AS lastMessageID,
                        (SELECT s.senderName FROM message s WHERE s.dmKey = m.dmKey
                          ORDER BY s.id DESC LIMIT 1) AS lastSender,

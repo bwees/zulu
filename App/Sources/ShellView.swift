@@ -8,9 +8,18 @@ import ZuluSync
 struct ShellView: View {
     @Environment(AppModel.self) private var model
 
-    private enum Section: Equatable { case channels, dms }
+    private enum Section: Equatable, Hashable {
+        case dms
+        case group(String)
+        /// Channels no group has claimed, so filing is optional rather than required.
+        case unfiled
+    }
 
-    @State private var section: Section = .channels
+    @State private var section: Section = .unfiled
+    @State private var visibleChannels: [ChannelSummary] = []
+    @State private var editingGroup: String?
+    @State private var creatingGroup = false
+    @State private var newGroupName = ""
     @State private var open = true
     @State private var drag: CGFloat = 0
     @State private var drawerMounted = true
@@ -86,21 +95,54 @@ struct ShellView: View {
         ScrollView {
             VStack(spacing: 12) {
                 railButton(
-                    systemImage: "bubble.left.and.bubble.right.fill",
                     active: section == .dms,
                     unread: model.dms.contains { $0.unreadCount > 0 },
                     // Every direct message is addressed to you, so each unread one counts.
                     mentions: model.dms.reduce(0) { $0 + $1.unreadCount }
-                ) { section = .dms }
+                ) { section = .dms } label: {
+                    RailIcon(systemImage: "bubble.left.and.bubble.right.fill", active: section == .dms)
+                }
 
                 Divider().frame(width: 28)
 
+                ForEach(model.groups) { group in
+                    railButton(
+                        active: section == .group(group.id),
+                        unread: group.unreadCount > 0,
+                        mentions: group.mentionCount
+                    ) {
+                        section = .group(group.id)
+                    } label: {
+                        GroupAvatar(
+                            name: group.name, icon: group.icon,
+                            active: section == .group(group.id)
+                        )
+                    }
+                    .contextMenu {
+                        Button("Edit group", systemImage: "pencil") { editingGroup = group.id }
+                        Button("Delete group", systemImage: "trash", role: .destructive) {
+                            if section == .group(group.id) { section = .unfiled }
+                            model.deleteGroup(id: group.id)
+                        }
+                    }
+                }
+
+                if !model.groups.isEmpty { Divider().frame(width: 28) }
+
                 railButton(
-                    systemImage: "number",
-                    active: section == .channels,
-                    unread: model.channels.contains { $0.unreadCount > 0 },
-                    mentions: model.channels.reduce(0) { $0 + $1.mentionCount }
-                ) { section = .channels }
+                    active: section == .unfiled,
+                    unread: false,
+                    mentions: 0
+                ) { section = .unfiled } label: {
+                    RailIcon(systemImage: "number", active: section == .unfiled)
+                }
+
+                railButton(active: false, unread: false, mentions: 0) {
+                    newGroupName = ""
+                    creatingGroup = true
+                } label: {
+                    RailIcon(systemImage: "plus")
+                }
             }
             .padding(.vertical, 12)
         }
@@ -111,19 +153,16 @@ struct ShellView: View {
 
     /// Unread is a pill on the rail's edge; a count only appears when something actually
     /// needs an answer. A number for every unread message turns the rail into noise.
-    private func railButton(
-        systemImage: String,
+    private func railButton<Face: View>(
         active: Bool,
         unread: Bool,
         mentions: Int,
-        action: @escaping () -> Void
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Face
     ) -> some View {
-        let shape = RoundedRectangle(cornerRadius: active ? 14 : 23)
-        return Button(action: action) {
-            Image(systemName: systemImage)
-                .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+        Button(action: action) {
+            label()
                 .frame(width: 46, height: 46)
-                .glassEffect(.regular.tint(active ? .accentColor : nil).interactive(), in: shape)
                 .overlay(alignment: .bottomTrailing) {
                     if mentions > 0 {
                         Text(mentions > 99 ? "99+" : "\(mentions)")
@@ -133,7 +172,9 @@ struct ShellView: View {
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(.red, in: Capsule())
-                            .overlay(Capsule().stroke(Color(.secondarySystemGroupedBackground), lineWidth: 2))
+                            .overlay(
+                                Capsule().stroke(Color(.secondarySystemGroupedBackground), lineWidth: 2)
+                            )
                             .fixedSize()
                             .offset(x: 4, y: 3)
                     }
@@ -150,11 +191,18 @@ struct ShellView: View {
         .animation(.snappy, value: unread)
     }
 
+    private var listTitle: String {
+        switch section {
+        case .dms: "Direct Messages"
+        case .unfiled: model.groups.isEmpty ? "Channels" : "Unfiled"
+        case .group(let id): model.groups.first { $0.id == id }?.name ?? "Channels"
+        }
+    }
+
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(section == .channels ? "Channels" : "Direct Messages")
-                    .font(.headline)
+                Text(listTitle).font(.headline).lineLimit(1)
                 Spacer()
                 SyncDot(status: model.status)
             }
@@ -164,14 +212,16 @@ struct ShellView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    switch section {
-                    case .channels:
-                        ForEach(model.channels) { channel in
-                            channelRow(channel)
-                        }
-                    case .dms:
-                        ForEach(model.dms) { dm in
-                            dmRow(dm)
+                    if section == .dms {
+                        ForEach(model.dms) { dm in dmRow(dm) }
+                    } else {
+                        ForEach(visibleChannels) { channel in channelRow(channel) }
+                        if visibleChannels.isEmpty {
+                            Text(emptyListMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 12)
                         }
                     }
                 }
@@ -181,6 +231,29 @@ struct ShellView: View {
             .refreshable { await model.refreshTopics() }
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea(edges: .vertical))
+        .task(id: section) { await observeChannels() }
+    }
+
+    private var emptyListMessage: String {
+        switch section {
+        case .group: "No channels in this group yet. Long-press its icon to edit."
+        default: "Every channel is filed into a group."
+        }
+    }
+
+    private func observeChannels() async {
+        guard section != .dms else { return }
+        let groupID: String? = if case .group(let id) = section { id } else { nil }
+        guard let writer = model.databaseWriter,
+              let observation = model.channelObservation(inGroup: groupID)
+        else { return }
+        do {
+            for try await rows in observation.values(in: writer) {
+                visibleChannels = rows
+            }
+        } catch {
+            // Observation ends when the section changes; nothing to recover.
+        }
     }
 
     private func channelRow(_ channel: ChannelSummary) -> some View {
@@ -252,6 +325,33 @@ struct ShellView: View {
                     }
                 }
         }
+        .sheet(item: Binding(get: { editingGroup.map(Identified.init) },
+                             set: { editingGroup = $0?.value })) { wrapper in
+            GroupEditor(groupID: wrapper.value)
+        }
+        .alert("New group", isPresented: $creatingGroup) {
+            TextField("Name", text: $newGroupName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") {
+                let name = newGroupName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                model.createGroup(named: name)
+            }
+        } message: {
+            Text("Group channels however you like. Groups stay on your devices — Zulip has no idea they exist.")
+        }
+        .onChange(of: model.pendingGroupToEdit) { _, id in
+            guard let id else { return }
+            editingGroup = id
+            section = .group(id)
+            model.pendingGroupToEdit = nil
+        }
+    }
+
+    /// `sheet(item:)` needs something Identifiable, and a bare String is not.
+    private struct Identified: Identifiable {
+        let value: String
+        var id: String { value }
     }
 
     @ViewBuilder
@@ -266,7 +366,7 @@ struct ShellView: View {
         case .dm(let key):
             ConversationView(source: .dm(key: key))
         case nil:
-            EmptyStateView(text: model.channels.isEmpty
+            EmptyStateView(text: model.allChannels.isEmpty
                 ? "Syncing your channels…"
                 : "Pick a channel to start reading.")
         }

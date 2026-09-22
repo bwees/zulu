@@ -7,6 +7,7 @@ public struct RegisterResponse: Decodable, Sendable {
     public let subscriptions: [Subscription]?
     public let realm_users: [ZulipUser]?
     public let max_message_length: Int?
+    public let unread_msgs: UnreadMessages?
 }
 
 /// Only the events Zulu acts on today. Anything else decodes to `.other` and is skipped,
@@ -102,7 +103,10 @@ extension ZulipClient {
             "client_gravatar": "false",
             "slim_presence": "true",
             "event_types": Self.json(eventTypes),
-            "fetch_event_types": Self.json(["subscription", "realm_user", "realm"]),
+            // unread_msgs is only included when both of these are fetched.
+            "fetch_event_types": Self.json(
+                ["subscription", "realm_user", "realm", "message", "update_message_flags"]
+            ),
             "include_subscribers": "false",
         ])
     }
@@ -122,5 +126,46 @@ extension ZulipClient {
     public func deleteQueue(queueID: String) async throws {
         struct Empty: Decodable {}
         let _: Empty = try await send(.delete, "events", parameters: ["queue_id": queueID])
+    }
+}
+
+/// The server's view of what is unread. Zulip owns this, not the client: a message read on
+/// another device has to show as read here too, so counts come from this rather than from
+/// whatever happens to be in the local store.
+public struct UnreadMessages: Decodable, Sendable {
+    public struct Channel: Decodable, Sendable {
+        public let stream_id: Int
+        public let topic: String
+        public let unread_message_ids: [Int]
+    }
+
+    public struct DirectMessage: Decodable, Sendable {
+        public let other_user_id: Int
+        public let unread_message_ids: [Int]
+    }
+
+    public struct GroupDirectMessage: Decodable, Sendable {
+        /// Comma-separated, sorted, and includes the current user.
+        public let user_ids_string: String
+        public let unread_message_ids: [Int]
+    }
+
+    public let streams: [Channel]
+    public let pms: [DirectMessage]
+    public let huddles: [GroupDirectMessage]
+    public let mentions: [Int]
+    /// True once the server hit its 50,000 cap, meaning older unreads are simply not reported.
+    public let old_unreads_missing: Bool?
+}
+
+extension ZulipClient {
+    public func markRead(messageIDs: [Int]) async throws {
+        guard !messageIDs.isEmpty else { return }
+        struct Response: Decodable {}
+        let _: Response = try await send(.post, "messages/flags", parameters: [
+            "messages": Self.json(messageIDs),
+            "op": "add",
+            "flag": "read",
+        ])
     }
 }

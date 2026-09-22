@@ -27,6 +27,7 @@ struct ConversationView: View {
     /// Snapshotted when the conversation opens, so the divider does not vanish the
     /// moment the messages behind it are marked read.
     @State private var firstUnreadID: Int?
+    @State private var readTracker: ReadTracker?
 
     /// Five minutes, matching what Discord and Slack settle on.
     private static let groupingWindow = 5 * 60
@@ -42,6 +43,7 @@ struct ConversationView: View {
                                 .id(UnreadDivider.anchor)
                         }
                         MessageRow(message: entry.message, startsGroup: entry.startsGroup)
+                            .onAppear { readTracker?.sawMessage(id: entry.message.id) }
                             .padding(.top, entry.startsGroup ? 14 : 2)
                             .id(entry.message.id)
                     }
@@ -111,7 +113,11 @@ struct ConversationView: View {
         .sheet(isPresented: $showEmoji) {
             EmojiPicker { draft.append($0) }
         }
-        .task(id: source) { await load() }
+        .task(id: source) {
+            readTracker = ReadTracker { ids in await model.markRead(ids) }
+            await load()
+        }
+        .onDisappear { Task { await readTracker?.flushNow() } }
     }
 
     /// Consecutive messages from one person collapse under a single header, the way every
@@ -235,7 +241,6 @@ struct ConversationView: View {
                     firstUnreadID = rows.first { !$0.isRead }?.id
                     isFirstBatch = false
                 }
-                model.markRead(rows.filter { !$0.isRead }.map(\.id))
             }
         } catch {
             // Observation ends when the view goes away; nothing to recover.

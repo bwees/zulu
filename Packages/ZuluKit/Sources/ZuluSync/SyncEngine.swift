@@ -96,6 +96,9 @@ public actor SyncEngine {
         if let subscriptions = registration.subscriptions {
             try store.replaceChannels(subscriptions)
         }
+        if let unread = registration.unread_msgs {
+            try store.replaceUnread(unread, selfUserID: selfUserID)
+        }
         if let users = registration.realm_users {
             try store.saveUsers(users)
         }
@@ -123,12 +126,14 @@ public actor SyncEngine {
             switch event {
             case .message(let message):
                 try store.save(messages: [message], selfUserID: selfUserID)
+                try store.noteArrival(of: message, selfUserID: selfUserID)
 
             case .deleteMessage(let ids):
                 try store.deleteMessages(ids: ids)
 
             case .flags(let operation, let flag, let messageIDs) where flag == "read":
                 try store.setRead(ids: messageIDs, read: operation == "add")
+                if operation == "add" { try store.clearUnread(ids: messageIDs) }
 
             case .updateMessage(let id, let renderedContent):
                 if let renderedContent {

@@ -175,3 +175,27 @@ public struct SyncStateRecord: Codable, FetchableRecord, PersistableRecord, Send
         self.lastEventID = lastEventID
     }
 }
+
+/// One unread message, as the server reports it. Kept apart from `message` because the
+/// server knows about unread messages this device has never fetched, and because read
+/// state changes on other devices without the message itself changing.
+public struct UnreadRecord: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
+    public static let databaseTableName = "unread"
+
+    public var messageID: Int
+    public var channelID: Int?
+    public var topic: String?
+    public var dmKey: String?
+    public var isMention: Bool
+
+    public init(
+        messageID: Int, channelID: Int? = nil, topic: String? = nil,
+        dmKey: String? = nil, isMention: Bool = false
+    ) {
+        self.messageID = messageID
+        self.channelID = channelID
+        self.topic = topic
+        self.dmKey = dmKey
+        self.isMention = isMention
+    }
+}

@@ -95,6 +95,35 @@ public final class ZuluStore: Sendable {
             }
         }
 
+        migrator.registerMigration("v2-unread") { db in
+            try db.create(table: "unread") { t in
+                t.primaryKey("messageID", .integer)
+                t.column("channelID", .integer)
+                t.column("topic", .text)
+                t.column("dmKey", .text)
+                t.column("isMention", .boolean).notNull().defaults(to: false)
+            }
+            try db.create(index: "unread_channel", on: "unread", columns: ["channelID", "topic"])
+            try db.create(index: "unread_dm", on: "unread", columns: ["dmKey"])
+        }
+
+        migrator.registerMigration("v3-groups") { db in
+            try db.create(table: "channelGroup") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("icon", .blob)
+                t.column("position", .integer).notNull().defaults(to: 0)
+            }
+            try db.create(table: "channelGroupMember") { t in
+                t.column("groupID", .text).notNull()
+                    .references("channelGroup", onDelete: .cascade)
+                t.column("channelID", .integer).notNull()
+                t.column("position", .integer).notNull().defaults(to: 0)
+                t.primaryKey(["groupID", "channelID"])
+            }
+            try db.create(index: "groupMember_channel", on: "channelGroupMember", columns: ["channelID"])
+        }
+
         return migrator
     }
 
@@ -176,9 +205,81 @@ public final class ZuluStore: Sendable {
 
     public func clearAll() throws {
         try writer.write { db in
-            for table in ["reaction", "message", "topic", "channel", "user", "syncState"] {
+            for table in ["reaction", "message", "topic", "channel", "user", "syncState", "unread"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
+        }
+    }
+}
+
+// MARK: - Unread state
+
+extension ZuluStore {
+
+    /// Replaces the unread set with the server's. Anything the server does not list is read,
+    /// including messages marked read on another device while this one was away.
+    public func replaceUnread(_ unread: UnreadMessages, selfUserID: Int) throws {
+        let mentions = Set(unread.mentions)
+        try writer.write { db in
+            try db.execute(sql: "DELETE FROM unread")
+
+            for channel in unread.streams {
+                for id in channel.unread_message_ids {
+                    try UnreadRecord(
+                        messageID: id, channelID: channel.stream_id, topic: channel.topic,
+                        isMention: mentions.contains(id)
+                    ).save(db)
+                }
+            }
+            for conversation in unread.pms {
+                let key = MessageRecord.dmKey(
+                    for: [conversation.other_user_id], selfUserID: selfUserID
+                )
+                for id in conversation.unread_message_ids {
+                    try UnreadRecord(messageID: id, dmKey: key, isMention: mentions.contains(id))
+                        .save(db)
+                }
+            }
+            for group in unread.huddles {
+                // Already sorted and already includes the current user.
+                for id in group.unread_message_ids {
+                    try UnreadRecord(
+                        messageID: id, dmKey: group.user_ids_string, isMention: mentions.contains(id)
+                    ).save(db)
+                }
+            }
+        }
+    }
+
+    /// A message that arrives while the queue is live starts unread unless the server says
+    /// otherwise, or unless it is the viewer's own.
+    public func noteArrival(of message: ZulipMessage, selfUserID: Int) throws {
+        guard !message.isRead, message.sender_id != selfUserID else { return }
+        try writer.write { db in
+            try UnreadRecord(
+                messageID: message.id,
+                channelID: message.isChannelMessage ? message.stream_id : nil,
+                topic: message.isChannelMessage ? message.subject : nil,
+                dmKey: message.isChannelMessage
+                    ? nil
+                    : MessageRecord.dmKey(
+                        for: message.dmParticipants.map(\.id), selfUserID: selfUserID
+                    ),
+                isMention: message.isMentioned
+            ).save(db)
+        }
+    }
+
+    public func clearUnread(ids: [Int]) throws {
+        guard !ids.isEmpty else { return }
+        try writer.write { db in
+            try UnreadRecord.filter(ids.contains(Column("messageID"))).deleteAll(db)
+        }
+    }
+
+    public func unreadIDs(limit: Int = 1000) throws -> [Int] {
+        try writer.read { db in
+            try Int.fetchAll(db, sql: "SELECT messageID FROM unread ORDER BY messageID LIMIT ?", arguments: [limit])
         }
     }
 }

@@ -28,12 +28,15 @@ final class AppModel {
     private(set) var account: ZulipAccount?
     private(set) var status: SyncStatus = .idle
 
-    private(set) var channels: [ChannelSummary] = []
+    private(set) var allChannels: [ChannelSummary] = []
+    private(set) var groups: [ChannelGroupSummary] = []
     private(set) var dms: [DMSummary] = []
     private(set) var users: [Int: UserRecord] = [:]
 
     var destination: Destination?
     var signInError: String?
+    /// Set when a freshly made group should open its editor straight away.
+    var pendingGroupToEdit: String?
     var isWorking = false
 
     fileprivate var store: ZuluStore?
@@ -81,7 +84,12 @@ final class AppModel {
         observers.removeAll()
         observers.append(
             store.observeChannels().start(in: store.writer, onError: { _ in }) { [weak self] rows in
-                self?.channels = rows
+                self?.allChannels = rows
+            }
+        )
+        observers.append(
+            store.observeGroups().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+                self?.groups = rows
             }
         )
         observers.append(
@@ -158,7 +166,8 @@ final class AppModel {
         store = nil
         client = nil
         sync = nil
-        channels = []
+        allChannels = []
+        groups = []
         dms = []
         users = [:]
         destination = nil
@@ -167,7 +176,7 @@ final class AppModel {
 
     // MARK: reading
 
-    func channel(_ id: Int) -> ChannelSummary? { channels.first { $0.id == id } }
+    func channel(_ id: Int) -> ChannelSummary? { allChannels.first { $0.id == id } }
 
     func topics(inChannel id: Int) -> ValueObservation<ValueReducers.Fetch<[TopicSummary]>>? {
         store?.observeTopics(inChannel: id)
@@ -229,10 +238,6 @@ final class AppModel {
         }
     }
 
-    func markRead(_ ids: [Int]) {
-        guard !ids.isEmpty else { return }
-        try? store?.setRead(ids: ids, read: true)
-    }
 
     static func describe(_ error: Error) -> String {
         guard let zulip = error as? ZulipError else { return error.localizedDescription }
@@ -321,5 +326,59 @@ extension AppModel {
         } catch {
             return .failure(Self.describe(error))
         }
+    }
+}
+
+// MARK: - Read state
+
+extension AppModel {
+    /// Clears the messages locally and tells the server, so the same messages read here
+    /// stop being unread everywhere else too.
+    func markRead(_ ids: [Int]) async {
+        guard !ids.isEmpty else { return }
+        try? store?.clearUnread(ids: ids)
+        try? store?.setRead(ids: ids, read: true)
+        // A failure here is not worth surfacing: the next register snapshot re-reads the
+        // server's own view and the counts correct themselves.
+        try? await client?.markRead(messageIDs: ids)
+    }
+}
+
+// MARK: - Channel groups
+
+extension AppModel {
+    var groupObservation: ValueObservation<ValueReducers.Fetch<[ChannelGroupSummary]>>? {
+        store?.observeGroups()
+    }
+
+    func channelObservation(inGroup id: String?)
+        -> ValueObservation<ValueReducers.Fetch<[ChannelSummary]>>?
+    {
+        store?.observeChannels(inGroup: id)
+    }
+
+    func createGroup(named name: String) {
+        guard let group = try? store?.createGroup(name: name) else { return }
+        pendingGroupToEdit = group.id
+    }
+
+    func renameGroup(id: String, to name: String) {
+        try? store?.updateGroup(id: id, name: name)
+    }
+
+    func setGroupIcon(id: String, icon: Data?) {
+        try? store?.updateGroup(id: id, icon: .some(icon))
+    }
+
+    func deleteGroup(id: String) {
+        try? store?.deleteGroup(id: id)
+    }
+
+    func channelIDs(inGroup id: String) -> [Int] {
+        (try? store?.channelIDs(inGroup: id)) ?? []
+    }
+
+    func setChannels(_ ids: [Int], inGroup groupID: String) {
+        try? store?.setChannels(ids, inGroup: groupID)
     }
 }
