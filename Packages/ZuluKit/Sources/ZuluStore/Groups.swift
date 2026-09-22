@@ -95,6 +95,7 @@ extension ZuluStore {
         return ValueObservation.tracking { db in
             try ChannelSummary.fetchAll(db, sql: """
                 SELECT c.id, c.name, c.isRestricted, c.isMuted, c.pinned,
+                       COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u

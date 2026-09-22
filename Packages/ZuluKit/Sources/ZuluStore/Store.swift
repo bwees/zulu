@@ -144,6 +144,13 @@ public final class ZuluStore: Sendable {
             }
         }
 
+        migrator.registerMigration("v5-channel-mode") { db in
+            try db.alter(table: "channel") { t in
+                t.add(column: "detectedForum", .boolean).notNull().defaults(to: false)
+                t.add(column: "modeOverride", .integer)
+            }
+        }
+
         return migrator
     }
 

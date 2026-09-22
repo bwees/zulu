@@ -293,6 +293,17 @@ struct ShellView: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Picker("Show as", selection: Binding(
+                get: { model.modeOverride(forChannel: channel.id) },
+                set: { model.setMode($0, forChannel: channel.id) }
+            )) {
+                Text("Automatic").tag(ChannelMode?.none)
+                ForEach(ChannelMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(ChannelMode?.some(mode))
+                }
+            }
+        }
     }
 
     /// A forum channel's live conversations, hung under it on a bracket so a topic is one

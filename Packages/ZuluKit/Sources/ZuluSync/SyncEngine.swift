@@ -117,6 +117,7 @@ public actor SyncEngine {
             guard !Task.isCancelled else { return }
             if let topics = try? await client.topics(inChannel: channel.id) {
                 try? store.saveTopics(topics, inChannel: channel.id)
+                try? store.refreshDetectedMode(forChannel: channel.id)
             }
         }
     }

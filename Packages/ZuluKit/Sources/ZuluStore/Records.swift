@@ -12,6 +12,10 @@ public struct ChannelRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var isRestricted: Bool
     public var isMuted: Bool
     public var pinned: Bool
+    /// Cached answer from the detector, recomputed whenever topics are refetched.
+    public var detectedForum = false
+    /// The person's explicit choice, which wins over the detector when set.
+    public var modeOverride: Int?
 
     public init(from subscription: Subscription) {
         id = subscription.stream_id

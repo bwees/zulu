@@ -441,3 +441,19 @@ extension AppModel {
         )
     }
 }
+
+// MARK: - Channel render mode
+
+extension AppModel {
+    /// `nil` hands the channel back to the detector.
+    func setMode(_ mode: ChannelMode?, forChannel id: Int) {
+        try? store?.setModeOverride(mode, forChannel: id)
+    }
+
+    func modeOverride(forChannel id: Int) -> ChannelMode? {
+        guard let record = try? store?.channels().first(where: { $0.id == id }),
+              let raw = record.modeOverride
+        else { return nil }
+        return ChannelMode(rawValue: raw)
+    }
+}

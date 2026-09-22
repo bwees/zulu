@@ -10,12 +10,14 @@ public struct ChannelSummary: Decodable, FetchableRecord, Sendable, Identifiable
     public var isMuted: Bool
     public var pinned: Bool
     public var topicCount: Int
+    /// The detector's answer, already overruled by the person's choice if they made one.
+    public var isForum: Bool
     public var unreadCount: Int
     public var mentionCount: Int
 
     /// A channel whose recent traffic all sits in one topic is a chat room in practice,
     /// whatever the server thinks. This is the auto-detection the map fixed.
-    public var rendersAsForum: Bool { topicCount > 1 }
+    public var rendersAsForum: Bool { isForum }
 }
 
 public struct TopicSummary: Decodable, FetchableRecord, Sendable, Identifiable, Equatable {
@@ -48,6 +50,7 @@ extension ZuluStore {
         ValueObservation.tracking { db in
             try ChannelSummary.fetchAll(db, sql: """
                 SELECT c.id, c.name, c.isRestricted, c.isMuted, c.pinned,
+                       COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
