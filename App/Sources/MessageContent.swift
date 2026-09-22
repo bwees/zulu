@@ -33,7 +33,18 @@ enum MessageContent {
         }
 
         var result = AttributedString(ns)
+        // The HTML importer stamps an explicit black UIColor on every run. That is a
+        // different attribute from SwiftUI's foregroundColor, so clearing only the SwiftUI
+        // one leaves black text on a dark background. Both have to go.
+        result.uiKit.foregroundColor = nil
+        result.uiKit.backgroundColor = nil
         result.foregroundColor = nil
+
+        // The importer ends every document with a newline.
+        while result.characters.last == "\n" {
+            result.removeSubrange(result.index(beforeCharacter: result.endIndex)..<result.endIndex)
+        }
+
         cache[messageID] = result
         return result
     }

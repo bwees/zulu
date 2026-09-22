@@ -21,10 +21,11 @@ struct ConversationView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(messages) { message in
-                        MessageRow(message: message)
-                            .id(message.id)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(grouped, id: \.message.id) { entry in
+                        MessageRow(message: entry.message, startsGroup: entry.startsGroup)
+                            .padding(.top, entry.startsGroup ? 14 : 2)
+                            .id(entry.message.id)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -51,6 +52,23 @@ struct ConversationView: View {
         }
         .task(id: source) { await load() }
     }
+
+    /// Consecutive messages from one person collapse under a single header, the way every
+    /// chat client does it. A long enough pause starts a new group even for the same sender,
+    /// so a conversation picked up hours later does not read as one block.
+    private var grouped: [(message: MessageRecord, startsGroup: Bool)] {
+        var previous: MessageRecord?
+        return messages.map { message in
+            defer { previous = message }
+            guard let previous else { return (message, true) }
+            let sameSender = previous.senderID == message.senderID
+            let closeInTime = message.timestamp - previous.timestamp < Self.groupingWindow
+            return (message, !(sameSender && closeInTime))
+        }
+    }
+
+    /// Five minutes, matching what Discord and Slack settle on.
+    private static let groupingWindow = 5 * 60
 
     private var title: String {
         switch source {
@@ -138,24 +156,37 @@ struct ConversationView: View {
 
 struct MessageRow: View {
     let message: MessageRecord
+    var startsGroup = true
+
+    private static let avatarSize: CGFloat = 36
+    private static let gutter: CGFloat = 10
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Avatar(name: message.senderName)
+        HStack(alignment: .top, spacing: Self.gutter) {
+            if startsGroup {
+                Avatar(name: message.senderName, size: Self.avatarSize)
+            } else {
+                // Continuations keep the text aligned under the header above them.
+                Color.clear.frame(width: Self.avatarSize, height: 1)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(message.senderName).font(.subheadline.weight(.semibold))
-                    Text(message.date, format: .dateTime.hour().minute())
-                        .font(.caption).foregroundStyle(.secondary)
-                    if message.editedAt != nil {
-                        Text("edited").font(.caption2).foregroundStyle(.tertiary)
+                if startsGroup {
+                    HStack(spacing: 6) {
+                        Text(message.senderName).font(.subheadline.weight(.semibold))
+                        Text(message.date, format: .dateTime.hour().minute())
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Text(MessageContent.attributed(html: message.renderedContent, messageID: message.id))
                     .font(.body)
                     .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
+
+            if message.editedAt != nil {
+                Text("edited").font(.caption2).foregroundStyle(.tertiary)
+            }
         }
     }
 }

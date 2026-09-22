@@ -60,6 +60,34 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
 
+    public init(
+        id: Int,
+        channelID: Int? = nil,
+        topic: String? = nil,
+        dmKey: String? = nil,
+        senderID: Int,
+        senderName: String,
+        senderAvatar: String? = nil,
+        renderedContent: String,
+        timestamp: Int,
+        isRead: Bool = false,
+        isMentioned: Bool = false,
+        editedAt: Int? = nil
+    ) {
+        self.id = id
+        self.channelID = channelID
+        self.topic = topic
+        self.dmKey = dmKey
+        self.senderID = senderID
+        self.senderName = senderName
+        self.senderAvatar = senderAvatar
+        self.renderedContent = renderedContent
+        self.timestamp = timestamp
+        self.isRead = isRead
+        self.isMentioned = isMentioned
+        self.editedAt = editedAt
+    }
+
     public init(from message: ZulipMessage, selfUserID: Int) {
         id = message.id
         senderID = message.sender_id
