@@ -384,7 +384,11 @@ struct ShellView: View {
             setOpen(false)
         } label: {
             HStack(spacing: 8) {
-                Avatar(name: model.title(forDM: dm.dmKey), size: 28)
+                SenderAvatar(
+                    name: model.title(forDM: dm.dmKey),
+                    userID: model.soleParticipant(inDM: dm.dmKey),
+                    size: 28
+                )
                 Text(model.title(forDM: dm.dmKey))
                     .font(.subheadline.weight(dm.unreadCount > 0 ? .semibold : .regular))
                     .lineLimit(1)

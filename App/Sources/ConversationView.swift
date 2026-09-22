@@ -157,7 +157,12 @@ struct MessageRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             if startsGroup {
-                Avatar(name: message.senderName, size: Self.avatarSize)
+                SenderAvatar(
+                    name: message.senderName,
+                    userID: message.senderID,
+                    url: message.senderAvatar,
+                    size: Self.avatarSize
+                )
             } else {
                 // Continuations keep the text aligned under the header above them.
                 Color.clear.frame(width: Self.avatarSize, height: 1)

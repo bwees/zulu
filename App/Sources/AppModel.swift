@@ -457,3 +457,13 @@ extension AppModel {
         return ChannelMode(rawValue: raw)
     }
 }
+
+extension AppModel {
+    /// The other person in a one-to-one conversation, so their own picture can stand for it.
+    /// A group conversation has no single face and falls back to initials.
+    func soleParticipant(inDM key: String) -> Int? {
+        guard let selfID = account?.userID else { return nil }
+        let others = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
+        return others.count == 1 ? others.first : nil
+    }
+}
