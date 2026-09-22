@@ -12,9 +12,18 @@ concurrency:
 jobs:
   apple:
     name: Build (Apple)
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Zulu targets iOS 27. A runner without the iOS 27 SDK will still build a
+      # deployment-target-27 project against an older SDK and miss every API that
+      # does not exist yet, so the toolchain is printed rather than assumed.
+      - name: Show available toolchains
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphone
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
