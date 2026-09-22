@@ -55,6 +55,11 @@ struct ChannelView: View {
                     }
                     .padding(.vertical, 2)
                 }
+                .contextMenu {
+                    Button("Promote to sidebar", systemImage: "arrow.up.left") {
+                        model.promote(topic: topic.name, inChannel: channel.id)
+                    }
+                }
             }
         }
         .listStyle(.plain)

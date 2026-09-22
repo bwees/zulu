@@ -239,3 +239,34 @@ enum ChannelVisibility {
           )
         """
 }
+
+extension ZuluStore {
+
+    static func registerOrderingMigration(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v10-channel-order") { db in
+            // Null means "no opinion", which sorts after everything the viewer has placed
+            // and falls back to alphabetical among themselves.
+            try db.alter(table: "channel") { t in
+                t.add(column: "position", .integer)
+            }
+        }
+    }
+
+    /// Writes an explicit order for exactly the channels listed, leaving every other
+    /// channel unplaced.
+    public func reorderChannels(ids: [Int]) throws {
+        try writer.write { db in
+            for (index, id) in ids.enumerated() {
+                try db.execute(
+                    sql: "UPDATE channel SET position = ? WHERE id = ?", arguments: [index, id]
+                )
+            }
+        }
+    }
+
+    public func clearChannelOrder() throws {
+        try writer.write { db in
+            try db.execute(sql: "UPDATE channel SET position = NULL")
+        }
+    }
+}

@@ -22,10 +22,10 @@ final class AppModel {
     enum Destination: Equatable, Hashable {
         case channel(Int)
         case dm(String)
-        /// A promoted topic is its own destination, not a topic pushed on top of its
-        /// channel. Routing it through the channel meant going back landed on that
-        /// channel's topic list — which is empty, because its topics are the promoted ones.
-        case promotedTopic(channelID: Int, topic: String, channelName: String)
+        /// A topic is its own destination, not something pushed on top of its channel.
+        /// Routing it through the channel meant the back gesture landed on a topic list
+        /// nobody asked for. The topic list is reached only by tapping the channel itself.
+        case topic(channelID: Int, name: String, channelName: String)
     }
 
     private(set) var phase: Phase = .loading

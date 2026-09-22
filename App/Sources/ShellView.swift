@@ -376,14 +376,15 @@ struct ShellView: View {
     }
 
     private func topicRow(_ topic: TopicSummary, in channel: ChannelSummary) -> some View {
-        let isOpen = path.contains(
-            .topic(channelID: channel.id, name: topic.name, channelName: channel.name)
+        let destination = AppModel.Destination.topic(
+            channelID: channel.id, name: topic.name, channelName: channel.name
         )
+        let isOpen = model.destination == destination
         return Button {
-            model.destination = .channel(channel.id)
-            path = [.topic(
-                channelID: channel.id, name: topic.name, channelName: channel.name
-            )]
+            // Straight to the conversation. Pushing it onto the channel's stack
+            // meant the back gesture landed on a topic list nobody asked for.
+            model.destination = destination
+            path = []
             setOpen(false)
         } label: {
             HStack(spacing: 6) {
@@ -418,8 +419,8 @@ struct ShellView: View {
     /// as the sidebar is concerned, and giving it its own treatment made the list
     /// look like two lists stapled together.
     private func promotedRow(_ promoted: PromotedTopicSummary) -> some View {
-        let destination = AppModel.Destination.promotedTopic(
-            channelID: promoted.channelID, topic: promoted.topic,
+        let destination = AppModel.Destination.topic(
+            channelID: promoted.channelID, name: promoted.topic,
             channelName: promoted.channelName
         )
         return Button {
@@ -595,9 +596,9 @@ struct ShellView: View {
             } else {
                 EmptyStateView(text: "That channel is no longer available.")
             }
-        case .promotedTopic(let channelID, let topic, let channelName):
+        case .topic(let channelID, let name, let channelName):
             ConversationView(source: .topic(
-                channelID: channelID, name: topic, channelName: channelName
+                channelID: channelID, name: name, channelName: channelName
             ))
         case .dm(let key):
             ConversationView(source: .dm(key: key))

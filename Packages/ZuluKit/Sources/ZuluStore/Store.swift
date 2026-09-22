@@ -155,6 +155,7 @@ public final class ZuluStore: Sendable {
 
         registerPersonalShapeMigration(&migrator)
         registerHidingMigration(&migrator)
+        registerOrderingMigration(&migrator)
 
         return migrator
     }

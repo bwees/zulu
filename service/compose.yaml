@@ -1,0 +1,28 @@
+services:
+  notifyd:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # 32 random bytes, base64: `head -c 32 /dev/urandom | base64`.
+      # Keep it out of the volume below — a database file and its key in the same
+      # place is the same as no encryption at all.
+      ZULU_KEY_ENCRYPTION_KEY: ${ZULU_KEY_ENCRYPTION_KEY:?set it in .env}
+      ZULU_DATABASE_PATH: /data/zulu.db
+      ZULU_HTTP_ADDR: ":8080"
+      ZULU_LOG_LEVEL: ${ZULU_LOG_LEVEL:-info}
+      # Without an Apple developer account, log pushes instead of sending them.
+      ZULU_APNS_DRY_RUN: ${ZULU_APNS_DRY_RUN:-true}
+      ZULU_APNS_KEY_FILE: ${ZULU_APNS_KEY_FILE:-}
+      ZULU_APNS_KEY_ID: ${ZULU_APNS_KEY_ID:-}
+      ZULU_APNS_TEAM_ID: ${ZULU_APNS_TEAM_ID:-}
+      ZULU_APNS_BUNDLE_ID: ${ZULU_APNS_BUNDLE_ID:-com.bwees.zulu}
+    volumes:
+      - zulu-data:/data
+      # The .p8 signing key, mounted read-only. Drop it in ./secrets/ and point
+      # ZULU_APNS_KEY_FILE at /run/secrets/apns.p8.
+      - ./secrets:/run/secrets:ro
+    restart: unless-stopped
+
+volumes:
+  zulu-data:
