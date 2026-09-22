@@ -30,6 +30,9 @@ final class AppModel {
 
     private(set) var allChannels: [ChannelSummary] = []
     private(set) var groups: [ChannelGroupSummary] = []
+    fileprivate(set) var unfiledChannels: [ChannelSummary] = []
+    fileprivate(set) var recentTopics: [Int: [TopicSummary]] = [:]
+    fileprivate var sidebarObserversStarted = false
     private(set) var dms: [DMSummary] = []
     private(set) var users: [Int: UserRecord] = [:]
 
@@ -42,7 +45,7 @@ final class AppModel {
     fileprivate var store: ZuluStore?
     fileprivate var client: ZulipClient?
     private var sync: SyncEngine?
-    private var observers: [AnyDatabaseCancellable] = []
+    fileprivate var observers: [AnyDatabaseCancellable] = []
 
     // MARK: lifecycle
 
@@ -68,6 +71,7 @@ final class AppModel {
             self.sync = sync
 
             observe(store)
+            startSidebarObservations()
             phase = .signedIn
 
             await sync.onStatusChange { [weak self] status in
@@ -168,6 +172,9 @@ final class AppModel {
         sync = nil
         allChannels = []
         groups = []
+        unfiledChannels = []
+        recentTopics = [:]
+        sidebarObserversStarted = false
         dms = []
         users = [:]
         destination = nil
@@ -409,5 +416,28 @@ extension AppModel {
 
         try? store.save(messages: page.messages, selfUserID: account.userID)
         return !page.found_oldest && !(page.history_limited ?? false)
+    }
+}
+
+// MARK: - Sidebar extras
+
+extension AppModel {
+    /// Kept observed rather than fetched on demand, because the rail shows whether the
+    /// unfiled channels have anything unread even while a group is selected.
+    func startSidebarObservations() {
+        guard let store, sidebarObserversStarted == false else { return }
+        sidebarObserversStarted = true
+
+        observers.append(
+            store.observeChannels(inGroup: nil).start(in: store.writer, onError: { _ in }) {
+                [weak self] rows in
+                self?.unfiledChannels = rows
+            }
+        )
+        observers.append(
+            store.observeRecentTopics().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+                self?.recentTopics = Dictionary(grouping: rows, by: \.channelID)
+            }
+        )
     }
 }

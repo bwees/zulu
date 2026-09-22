@@ -131,8 +131,8 @@ struct ShellView: View {
 
                 railButton(
                     active: section == .unfiled,
-                    unread: false,
-                    mentions: 0
+                    unread: model.unfiledChannels.contains { $0.unreadCount > 0 },
+                    mentions: model.unfiledChannels.reduce(0) { $0 + $1.mentionCount }
                 ) { section = .unfiled } label: {
                     RailIcon(systemImage: "number", active: section == .unfiled)
                 }
@@ -146,6 +146,9 @@ struct ShellView: View {
             }
             .padding(.vertical, 12)
         }
+        // Liquid Glass morphs beyond a controls bounds, and a ScrollView clips by
+        // default, which shears the animation off mid-flight.
+        .scrollClipDisabled()
         .scrollEdgeEffectStyle(.soft, for: .all)
         .frame(width: railW)
         .background(Color(.secondarySystemGroupedBackground).ignoresSafeArea(edges: .vertical))
@@ -215,7 +218,12 @@ struct ShellView: View {
                     if section == .dms {
                         ForEach(model.dms) { dm in dmRow(dm) }
                     } else {
-                        ForEach(visibleChannels) { channel in channelRow(channel) }
+                        ForEach(visibleChannels) { channel in
+                            channelRow(channel)
+                            if channel.rendersAsForum {
+                                topicBranch(under: channel)
+                            }
+                        }
                         if visibleChannels.isEmpty {
                             Text(emptyListMessage)
                                 .font(.footnote)
@@ -285,6 +293,77 @@ struct ShellView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// A forum channel's live conversations, hung under it on a bracket so a topic is one
+    /// tap away instead of two. Only the few most recent, or the sidebar becomes the
+    /// conversation list.
+    @ViewBuilder
+    private func topicBranch(under channel: ChannelSummary) -> some View {
+        let topics = model.recentTopics[channel.id] ?? []
+        if !topics.isEmpty {
+            HStack(alignment: .top, spacing: 0) {
+                TopicBracket(count: topics.count)
+                    .stroke(.tertiary, lineWidth: 1.5)
+                    .frame(width: 16)
+                    .padding(.leading, 16)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(topics) { topic in
+                        Button {
+                            model.destination = .channel(channel.id)
+                            path = [.topic(
+                                channelID: channel.id, name: topic.name, channelName: channel.name
+                            )]
+                            setOpen(false)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(topic.name.isEmpty ? "general chat" : topic.name)
+                                    .font(.footnote.weight(topic.unreadCount > 0 ? .semibold : .regular))
+                                    .foregroundStyle(topic.unreadCount > 0 ? .primary : .secondary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 4)
+                                if topic.unreadCount > 0 {
+                                    Circle().fill(.primary).frame(width: 6, height: 6)
+                                }
+                            }
+                            .frame(height: Self.topicRowHeight)
+                            .padding(.horizontal, 8)
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.trailing, 8)
+        }
+    }
+
+    private static let topicRowHeight: CGFloat = 26
+
+    /// The elbow bracket Discord draws beside nested threads.
+    private struct TopicBracket: Shape {
+        let count: Int
+
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            let rowHeight = ShellView.topicRowHeight
+            let lastCentre = rowHeight * (CGFloat(count) - 0.5)
+            path.move(to: CGPoint(x: rect.minX, y: 0))
+            path.addLine(to: CGPoint(x: rect.minX, y: lastCentre - 6))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.minX + 6, y: lastCentre),
+                control: CGPoint(x: rect.minX, y: lastCentre)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX, y: lastCentre))
+
+            for index in 0..<max(count - 1, 0) {
+                let centre = rowHeight * (CGFloat(index) + 0.5)
+                path.move(to: CGPoint(x: rect.minX, y: centre))
+                path.addLine(to: CGPoint(x: rect.maxX, y: centre))
+            }
+            return path
+        }
     }
 
     private func dmRow(_ dm: DMSummary) -> some View {

@@ -179,3 +179,32 @@ extension ZuluStore {
         }
     }
 }
+
+extension ZuluStore {
+    /// The most recently active topics across every channel, so the sidebar can show a
+    /// channel's live conversations without a query per channel.
+    public func observeRecentTopics(perChannel limit: Int = 3)
+        -> ValueObservation<ValueReducers.Fetch<[TopicSummary]>>
+    {
+        ValueObservation.tracking { db in
+            try TopicSummary.fetchAll(db, sql: """
+                SELECT t.channelID, t.name, t.maxMessageID,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = t.channelID AND u.topic = t.name) AS unreadCount,
+                       (SELECT m.senderName FROM message m
+                         WHERE m.channelID = t.channelID AND m.topic = t.name
+                         ORDER BY m.id DESC LIMIT 1) AS lastSender,
+                       (SELECT m.timestamp FROM message m
+                         WHERE m.channelID = t.channelID AND m.topic = t.name
+                         ORDER BY m.id DESC LIMIT 1) AS lastTimestamp
+                  FROM topic t
+                 WHERE (
+                        SELECT COUNT(*) FROM topic peer
+                         WHERE peer.channelID = t.channelID
+                           AND peer.maxMessageID > t.maxMessageID
+                       ) < ?
+                 ORDER BY t.channelID, t.maxMessageID DESC
+                """, arguments: [limit])
+        }
+    }
+}
