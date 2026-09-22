@@ -90,6 +90,7 @@ struct ComposerBar: View {
             await autocomplete?.prepare()
         }
         .onChange(of: draft) { autocomplete?.update(draft: draft) }
+        .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
         .sheet(isPresented: $showEmoji) { EmojiPicker { insert($0) } }
         .photosPicker(
             isPresented: binding(for: .photos), selection: $pickedPhotos,
@@ -134,6 +135,15 @@ struct ComposerBar: View {
             .padding(.bottom, 5)
         }
         .glassEffect(.regular, in: .capsule)
+    }
+
+    /// A quote-and-reply is appended rather than replacing what is there, so replying
+    /// after starting to type does not throw the typing away.
+    private func takeDelivery() {
+        guard let text = ComposerInbox.shared.take(for: ConversationKey.of(source)) else { return }
+        if !draft.isEmpty, !draft.hasSuffix("\n") { draft += "\n" }
+        draft += text
+        focused = true
     }
 
     /// The picker hands back a shortcode rather than a character, because the server

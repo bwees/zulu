@@ -28,7 +28,9 @@ let package = Package(
             .product(name: "GRDB", package: "GRDB.swift"),
         ]),
         .target(name: "ZuluSync", dependencies: ["ZulipAPI", "ZuluEmoji", "ZuluStore"]),
-        .testTarget(name: "ZuluComposeTests", dependencies: ["ZuluCompose"]),
+        // ZuluMarkup so quote-and-reply can be asserted against the parser that reads it
+        // back out, rather than against a transcription of what that parser expects.
+        .testTarget(name: "ZuluComposeTests", dependencies: ["ZuluCompose", "ZuluMarkup"]),
         .testTarget(name: "ZuluEmojiTests", dependencies: ["ZuluEmoji"]),
         .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore", "ZulipAPI", "ZuluEmoji"]),
         .testTarget(name: "ZuluMarkupTests", dependencies: ["ZuluMarkup"]),

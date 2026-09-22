@@ -21,11 +21,13 @@ final class MessageHistoryLoader {
     /// behind it are marked read.
     private(set) var firstUnreadID: Int?
     private(set) var isReady = false
+    private(set) var reactions: [Int: [ReactionGroup]] = [:]
 
     private let source: ConversationView.Source
     private let model: AppModel
     private var scrollPhase: ScrollPhase = .idle
     private var observationTask: Task<Void, Never>?
+    private var reactionTask: Task<Void, Never>?
 
     init(source: ConversationView.Source, model: AppModel) {
         self.source = source
@@ -37,10 +39,13 @@ final class MessageHistoryLoader {
     func stop() {
         observationTask?.cancel()
         observationTask = nil
+        reactionTask?.cancel()
+        reactionTask = nil
     }
 
     func start() async {
         await loadInitialHistory()
+        observeReactions()
         observe()
     }
 
@@ -129,4 +134,27 @@ struct GroupedMessage: Identifiable {
     let startsGroup: Bool
 
     var id: Int { message.id }
+}
+
+extension MessageHistoryLoader {
+    /// Reactions arrive as one observation for the whole conversation. Watching them per
+    /// message meant every row started empty and grew once its own query returned — and a
+    /// lazy row that gains height after it has been measured is not reliably re-laid-out,
+    /// so the chips never appeared at all.
+    func observeReactions() {
+        guard let writer = model.databaseWriter, let store = model.storeForReading else { return }
+        reactionTask = Task { [weak self] in
+            do {
+                for try await records in store.observeAllReactions().values(in: writer) {
+                    guard let self else { return }
+                    let byMessage = Dictionary(grouping: records, by: \.messageID)
+                    reactions = byMessage.mapValues {
+                        ReactionGroup.group($0, selfUserID: model.selfUserID)
+                    }
+                }
+            } catch {
+                // Ends with the conversation; nothing to recover.
+            }
+        }
+    }
 }

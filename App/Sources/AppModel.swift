@@ -467,3 +467,8 @@ extension AppModel {
         return others.count == 1 ? others.first : nil
     }
 }
+
+extension AppModel {
+    /// True once the store exists, so views that observe it know when to start.
+    var isReady: Bool { store != nil }
+}

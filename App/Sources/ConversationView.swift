@@ -1,4 +1,5 @@
 import SwiftUI
+import ZuluEmoji
 import ZuluStore
 
 /// One conversation: a channel topic, or a DM. Reads messages out of the store and
@@ -71,7 +72,11 @@ struct ConversationView: View {
                         if entry.message.id == loader.firstUnreadID {
                             UnreadDivider().padding(.top, 10)
                         }
-                        MessageRow(message: entry.message, startsGroup: entry.startsGroup)
+                        MessageRow(
+                            message: entry.message,
+                            startsGroup: entry.startsGroup,
+                            reactions: loader.reactions[entry.message.id] ?? []
+                        )
                             .padding(.top, entry.startsGroup ? 14 : 2)
                     }
                     .onAppear { readTracker?.sawMessage(id: entry.message.id) }
@@ -151,6 +156,7 @@ struct UnreadDivider: View {
 struct MessageRow: View {
     let message: MessageRecord
     var startsGroup = true
+    var reactions: [ReactionGroup] = []
 
     private static let avatarSize: CGFloat = 36
 
@@ -179,7 +185,7 @@ struct MessageRow: View {
                         }
                     }
                 }
-                MessageContent(message: message)
+                MessageContent(message: message).messageActions(message, reactions: reactions)
             }
         }
     }
