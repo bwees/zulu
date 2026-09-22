@@ -35,11 +35,15 @@ Anything I could not determine is listed in §14.
 - **Names containing `` ` `` `>` `*` `&` `[` `]` or `$$` cannot be expressed in this syntax
   at all** — the web client detects that and falls back to a plain markdown link. This is a
   real correctness trap; details in §8.4.
-- **Ranking is not "prefix first" alone.** The web client runs a six-bucket triage
-  (exact → diacritic-prefix → case-sensitive prefix → case-insensitive prefix → word-boundary
-  → rest), then applies a per-type relevance comparator inside each bucket: subscription and
-  recency for people, pinned/active/traffic for channels, a popularity list for emoji.
-  Details in §10–§12.
+- **Ranking is not "prefix first" alone, and it is two-stage.** Match quality puts a result
+  in a bucket; a per-type relevance comparator orders ties *inside* the bucket —
+  subscription and recency for people, pinned/active/traffic for channels, a popularity list
+  for emoji. Web does this with a six-bucket triage plus lazy getters (§10); zulip-flutter
+  does it with an integer `rank` plus a stable bucket sort (§11), which is the cleaner model
+  to port. **Copy flutter's emoji rank table (§11.4) — it is exactly the "realm custom emoji
+  first" behaviour the ticket wants, and it makes the picker and the `:` autocomplete the
+  same code.**
+- **The two official clients disagree in places.** Side-by-side table in §11.10.
 
 ---
 
@@ -1056,9 +1060,15 @@ first property where the two differ:
 Candidate source is `stream_data.get_unsorted_subs_with_content_access()`; the matcher is
 `query_matches_string_in_order(query, stream.name, " ", …)`.
 
-Zulu equivalents from the API: `pin_to_top` and `is_muted` from `subscriptions`,
-`is_recently_active` and `subscriber_count` from `BasicChannel`. There is no
-`stream_weekly_traffic` in the register response under that name — see §14.
+Every input is available over the API: `pin_to_top` and `is_muted` from `subscriptions`,
+and `is_recently_active`, `subscriber_count` and `stream_weekly_traffic` on `BasicChannel`:
+
+> `stream_weekly_traffic` — The average number of messages sent to the channel per week, as
+> estimated based on recent weeks, rounded to the nearest integer. If `null`, no information
+> is provided on the average traffic. […] **Changes**: New in Zulip 8.0 (feature level 199).
+> Previously, this statistic was available only in subscription objects.
+
+— <https://github.com/zulip/zulip/blob/main/zerver/openapi/zulip.yaml> (`BasicChannel`)
 
 ### 10.6 Emoji (`:`)
 
@@ -1192,9 +1202,509 @@ Non-silent user mentions in DMs may be rewritten to silent by
 
 ---
 
-## 11. zulip-flutter
+## 11. zulip-flutter — the closer model for Zulu
 
-_(pending — see §14 if this section is still empty)_
+zulip-flutter is Zulip's own modern native client, and its structure is a better template
+for Zulu than the web app's. Everything below is from
+<https://github.com/zulip/zulip-flutter/tree/main>.
+
+### 11.1 Architecture, in one paragraph
+
+Two stages, always:
+
+1. A **pre-sorted candidate list** built once at view-model init
+   (`_usersByRelevance`, `_userGroupsByRelevance`, `_generateAllCandidates`).
+2. `computeResults()` filters, assigns each result a small integer `rank`, and
+   `bucketSort(unsorted, (r) => r.rank, numBuckets: N)`. `bucketSort`
+   (`lib/model/algorithms.dart`) is documented as **stable**, so the pre-sort from stage 1
+   is the tiebreak inside each rank bucket.
+
+Rank beats relevance. Relevance only orders ties. This is a much easier model to port to
+Swift than web's lazy-getter cascade, and it is O(n + buckets) instead of a comparator sort.
+
+Search is cooperative-async: `filterCandidates` yields every 1000 candidates and calls
+`shouldStop()`, which aborts when the query changed or all listeners went away
+(`lib/model/autocomplete.dart`).
+
+### 11.2 Trigger detection
+
+Lookback bound (the analogue of web's 86):
+
+```dart
+  // To avoid spending a lot of time searching for autocomplete intents
+  // in long messages, we bound how far back we look for the intent's start.
+  int get _maxLookbackForAutocompleteIntent {
+    return 1 // intent character, e.g. "#"
+      + 2 // some optional characters e.g., "_" for silent mention or "**"
+      // Per the API doc, maxChannelNameLength is in Unicode code points.
+      // We walk the string by UTF-16 code units, and there might be one or two
+      // of those encoding each Unicode code point.
+      + 2 * store.maxChannelNameLength;
+  }
+```
+— `lib/model/autocomplete.dart` (`ComposeContentAutocomplete`)
+
+`maxChannelNameLength` is `max_stream_name_length` from `/register` — i.e. **server-driven,
+not a constant**. Good idea for Zulu.
+
+The scan walks backwards from the cursor; **any trigger character strictly inside the
+selection aborts autocomplete**; otherwise the right-most matching trigger wins. All three
+regexes are anchored with `$`, so the match must run exactly from the trigger to the cursor.
+
+Mention:
+
+```dart
+  // What's likely to come before an @-mention: the start of the string,
+  // whitespace, or punctuation. Letters are unlikely; in that case an email
+  // might be intended. …
+  const beforeAtSign = r'(?<=^|\s|\p{Punctuation})';
+
+  // Characters that would defeat searches in full_name and emails, since
+  // they're prohibited in both forms. …
+  const fullNameAndEmailCharExclusions = r'\*`\\>"\p{Other}';
+```
+
+Emoji:
+
+```dart
+  // Similar reasoning as in _mentionIntentRegex.
+  // Specifically forbid a preceding ":", though, to make "::" not a query.
+  const before = r'(?<=^|\s|\p{Punctuation})(?<!:)';
+  const nameCharacters = r'_\p{Letter}\p{Number}';
+  // Recognize '+' only as part of '+1', the only emoji name that has it.
+  // Reject on whitespace right after ':'; … Similarly reject starting with ':-',
+  // which is common for emoticons.
+```
+
+Channel:
+
+```dart
+  const before = r'(?<=^|\s|\p{Punctuation})(?<![#@])';
+```
+so `##channel` queries `channel` and `@#user` queries `user`. Both `#foo` and `#**foo`
+yield the raw query `foo` — **backspacing into a completed `#**channel**` re-opens the
+box**, which web does not do.
+
+Topic input has no trigger at all: the whole topic field is the query.
+
+Differences from web worth noting: flutter allows a **non-collapsed selection** (the comment
+says autocorrect and backspace programmatically expand the selection), uses Unicode property
+classes rather than an ASCII whitelist for the preceding character, and has **no
+right-of-cursor terminal-symbol abort**.
+
+### 11.3 Mention ranking
+
+Eight buckets, 0 best:
+
+```dart
+    if (nameMatchQuality != null) {
+      return switch (nameMatchQuality) {
+        NameMatchQuality.exact =>        1,
+        NameMatchQuality.totalPrefix =>  2,
+        NameMatchQuality.wordPrefixes => 3,
+      };
+    }
+    assert(matchesEmail == true);
+    return 7;
+```
+plus `_rankWildcardResult = 0` and groups at 4 / 5 / 6.
+
+**wildcard → user exact → user total-prefix → user word-prefixes → group exact → group
+total-prefix → group word-prefixes → user email-prefix.**
+— `lib/model/autocomplete.dart` (`MentionAutocompleteQuery`)
+
+Match qualities:
+
+```dart
+    if (normalizedName.startsWith(_normalized)) {
+      if (normalizedName.length == _normalized.length) return NameMatchQuality.exact;
+      else                                             return NameMatchQuality.totalPrefix;
+    }
+    if (_testContainsQueryWords(normalizedNameWords)) return NameMatchQuality.wordPrefixes;
+    return null;
+```
+`wordPrefixes` means *all* the query's words prefix-match distinct name words **in order** —
+strictly smarter than web's single word-boundary bucket. Normalization is
+`toLowerCase()` → NFKD → strip `\p{M}`, with the comment *"Anders reports that this is what
+web does"*.
+
+`testUser` rejects inactive and muted users up front; email matching is
+`deliveryEmail.startsWith(query)` only.
+
+Relevance comparator (tiebreak inside a bucket):
+
+```dart
+  static int _compareByRelevance(User userA, User userB, {…}) {
+    // TODO(#618): give preference to subscribed users first
+    if (channelId != null) {
+      final recencyResult = compareByRecency(userA, userB, …);
+      if (recencyResult != 0) return recencyResult;
+    }
+    final dmsResult = compareByDms(userA, userB, store: store);
+    if (dmsResult != 0) return dmsResult;
+    final botStatusResult = compareByBotStatus(userA, userB);
+    if (botStatusResult != 0) return botStatusResult;
+    return compareByAlphabeticalOrder(userA, userB, store: store);
+  }
+```
+
+**recency in topic → recency in channel → DM recency → non-bots before bots → alphabetical.**
+Note the `TODO(#618)`: flutter **does not yet** rank subscribers first, which web does. So
+on this one point web is ahead.
+
+The `rank` field carries a long design commentary that is the single most useful paragraph
+in either codebase for Zulu (abridged, verbatim):
+
+```
+  // Compare sort_recipients in Zulip web: …
+  // Behavior we have that web doesn't and might like to follow:
+  // - A "word-prefixes" match quality on user and user-group names …
+  // Behavior web has that seems undesired, which we don't plan to follow:
+  // - Ranking humans above bots, even when the bots have higher relevance
+  //   and better match quality. If there's a bot participating in the
+  //   current conversation and I start typing its name, why wouldn't we want
+  //   that as a top result? Issue: https://github.com/zulip/zulip/issues/35467
+  // - A "word-boundary" match quality … Our [NameMatchQuality.wordPrefixes] seems smarter.
+  // - An "exact" match quality on emails: probably not worth its complexity. …
+  // - Ranking some case-sensitive matches differently from case-insensitive
+  //   matches. Users will expect a lowercase query to be adequate.
+```
+
+So: **do not copy web's case-sensitive bucket, and do not demote bots below a better
+match.** Zulip's own newer client deliberately dropped both.
+
+Wildcards: only **one** channel wildcard is ever offered (first available of
+`all`, `everyone`, then `channel` if FL ≥ 247 else `stream`), `topic` only on channel
+messages at FL ≥ 224, and **silent queries (`@_…`) get no wildcards at all**.
+
+User groups: `store.activeGroups.where((g) => !g.isSystemGroup)`, sorted alphabetically,
+matched on name only. Marked `TODO(#1776)` to switch to `can_mention_group` — so flutter is
+*behind* web here; follow web and filter by `can_mention_group`.
+
+### 11.4 Emoji ranking
+
+Four match qualities and nine rank buckets:
+
+```dart
+enum EmojiMatchQuality {
+  /// The query matches the whole emoji name (or the literal emoji itself).
+  exact,
+  /// The query matches a prefix of the emoji name, but not the whole name.
+  prefix,
+  /// The query matches starting at the start of a word in the emoji name,
+  /// but not the start of the whole name.
+  ///
+  /// For example a name "ab_cd_ef" would match queries "c" or "cd_e"
+  /// at this level, but not a query "b_cd_ef".
+  wordAligned,
+  /// The query matches somewhere in the emoji name,
+  /// but not at the start of any word.
+  other;
+```
+
+```dart
+    return switch (matchQuality) {
+      EmojiMatchQuality.exact       => 0,
+      EmojiMatchQuality.prefix      => isPopular ? 1 : isCustomEmoji ? 3 : 5,
+      EmojiMatchQuality.wordAligned => isPopular ? 2 : isCustomEmoji ? 4 : 6,
+      EmojiMatchQuality.other       =>                 isCustomEmoji ? 7 : 8,
+    };
+```
+— `lib/model/emoji.dart` (`EmojiAutocompleteQuery._rankResult`)
+
+| rank | contents |
+|---|---|
+| 0 | exact, any type |
+| 1 | popular, prefix |
+| 2 | popular, word-aligned |
+| 3 | **custom**, prefix |
+| 4 | **custom**, word-aligned |
+| 5 | unicode, prefix |
+| 6 | unicode, word-aligned |
+| 7 | custom, other |
+| 8 | unicode, other |
+
+`isCustomEmoji` covers **both** `realmEmoji` and `zulipExtraEmoji` — with the comment
+*"The web implementation calls this condition `is_realm_emoji`, but its actual semantics is
+it's true for the Zulip extra emoji too."*
+
+**This table is the direct answer to the ticket's "realm custom emoji first".** An empty
+query returns `prefix` for everything, so the picker with no query shows: the six popular
+emoji, then all realm emoji + `:zulip:`, then every unicode emoji. That is exactly the
+ordering the ticket asks for, and it falls out of the same ranking used by `:` autocomplete
+— **one catalogue, one ranker, two surfaces**.
+
+Matching (`EmojiAutocompleteQuery.match` / `_matchName`):
+
+- query is `raw.replaceAll(' ', '_')` then lowercase + NFKD + strip marks;
+- the **literal glyph** matches exactly, after trimming and stripping `U+FE0F` — flutter
+  flags that web fails here (`_adjustQueryForExactUnicode`);
+- name and **every alias** are tested, taking the best quality;
+- a query without `_` may match anywhere in the name (`other`); a query containing `_`
+  requires at least word-aligned.
+
+Popular emoji are stored as **codes, names resolved from server data**:
+
+```dart
+  /// Codes for the popular emoji, in order; all are Unicode emoji.
+  // This list should match web: …
+    return [
+      check('1f44d', '👍'),
+      check('1f389', '🎉'),
+      check('1f642', '🙂'),
+      check('2764', '❤'),
+      check('1f6e0', '🛠'),
+      check('1f419', '🐙'),
+    ];
+```
+— `lib/model/emoji.dart` (`EmojiStoreImpl._popularEmojiCodesList`)
+
+That is the right shape for Zulu: hardcode codes, never names (names differ per server
+version). Flutter does **not** implement web's usage-frequency reordering.
+
+Candidate order in `_generateAllCandidates`: popular → all other server emoji → active realm
+emoji (skipping any named `zulip`) → the `zulip_extra_emoji`. Name shadowing is handled by
+building `namesOverridden = {…activeRealmEmoji names, 'zulip'}` and **removing those names
+from the unicode emoji's name list**, dropping the unicode emoji entirely if it has no names
+left.
+
+### 11.5 Emoji display resolution
+
+```dart
+    switch (emojiType) {
+      case ReactionType.unicodeEmoji:
+        final parsed = tryParseEmojiCodeToUnicode(emojiCode);
+        if (parsed == null) break;
+        return UnicodeEmojiDisplay(emojiName: emojiName, emojiUnicode: parsed);
+
+      case ReactionType.realmEmoji:
+        final item = allRealmEmoji[emojiCode];
+        if (item == null) break;
+        // TODO we don't check emojiName matches the known realm emoji; is that right?
+        return _tryImageEmojiDisplay(
+          sourceUrl: item.sourceUrl, stillUrl: item.stillUrl, emojiName: emojiName);
+
+      case ReactionType.zulipExtraEmoji:
+        return _tryImageEmojiDisplay(
+          sourceUrl: kZulipEmojiUrl, stillUrl: null, emojiName: emojiName);
+    }
+    return TextEmojiDisplay(emojiName: emojiName);
+```
+— `lib/model/emoji.dart` (`EmojiStoreImpl.emojiDisplayFor`)
+
+Three display types — `UnicodeEmojiDisplay`, `ImageEmojiDisplay`, `TextEmojiDisplay` — and
+**every failure path degrades to text**: unparseable code, unknown realm emoji id,
+unresolvable URL. `TextEmojiDisplay` is also what the user's `emojiset: "text"` setting
+produces, via `EmojiDisplay.resolve(userSettings)`. The text form inserts zero-width
+characters so it doesn't get re-parsed:
+
+```dart
+String textEmojiForEmojiName(String emojiName) {
+  return ':﻿${emojiName.replaceAll('_', '​_')}﻿:';
+}
+```
+
+Note the lookup uses **`allRealmEmoji`** (including deactivated) for display but
+**`activeRealmEmoji`** for the candidate list — the §3.2 split, implemented.
+
+Code → glyph:
+
+```dart
+    return String.fromCharCodes(emojiCode.split('-')
+      .map((hex) => int.parse(hex, radix: 16)));
+```
+— `lib/api/model/model.dart` (`tryParseEmojiCodeToUnicode`)
+
+No `U+FE0F` is re-added. Rendering picks the platform font: Apple Color Emoji on iOS/macOS,
+Noto Color Emoji elsewhere (`lib/widgets/emoji.dart`).
+
+### 11.6 Fetching `server_emoji_data_url`
+
+```dart
+/// Fetch data from the URL described by [InitialSnapshot.serverEmojiDataUrl].
+///
+/// This request is unauthenticated, and the URL need not be on the realm.
+/// The given [ApiConnection] is used for providing a `User-Agent` header
+/// and for handling errors.
+…
+  return connection.send('fetchServerEmojiData', ServerEmojiData.fromJson,
+    useAuth: false,
+    http.Request('GET', emojiDataUrl));
+```
+— `lib/api/route/realm.dart`
+
+**`useAuth: false`** — independent confirmation of §2.3. The same file warns that this
+endpoint does not follow Zulip's `{code, msg, result}` error convention or return
+`"result": "success"`, so generic API error handling misfires on it.
+
+Scheduling (`lib/model/store.dart`, `UpdateMachine`): fire-and-forget right after `poll()`
+starts, retried forever with `BackoffMachine(firstBound: 2s, maxBound: 2min)`. The rationale
+is the best statement of the caching design anywhere:
+
+```
+  /// Effectively it's data that *would have* been in the [registerQueue]
+  /// response, except that we pulled it out to its own endpoint as part of
+  /// a caching strategy, because the data changes infrequently.
+  ///
+  /// Conveniently (a) this deferred fetch doesn't cause any fetch/event race,
+  /// because this data doesn't get updated by events anyway (it can change
+  /// only on a server restart); and (b) we don't need this data for displaying
+  /// messages or anything else, only for certain UIs like the emoji picker,
+  /// so it's fine that we go without it for a while.
+```
+
+Until it arrives, the picker shows only realm emoji and `:zulip:`
+(`_serverEmojiData = null; // TODO(#974) maybe start from a hard-coded baseline`).
+
+Flutter builds **no name → code index** — it keeps the server's code → names map and
+linear-scans `allEmojiCandidates()`. With ~1900 codes and cooperative yielding that is fine;
+in Swift a dictionary is cheaper and there is no reason to copy this.
+
+Flutter's minimum supported server is `kMinSupportedZulipFeatureLevel = 371`
+(`lib/api/core.dart`), which is why `serverEmojiDataUrl` is declared non-nullable with no
+`TODO(server-N)` — there is no FL < 140 case to handle. Zulu should pick a floor the same way.
+
+### 11.7 Realm emoji model and events
+
+```dart
+@JsonSerializable(fieldRename: FieldRename.snake)
+class RealmEmojiItem {
+  @JsonKey(name: 'id')
+  final String emojiCode;
+  final String name;
+  final String sourceUrl;
+
+  /// The non-animated version, if this is an animated emoji.
+  ///
+  /// As of 2025-10, this will be missing on animated emoji
+  /// that were uploaded before Zulip Server 5 when this was added;
+  /// see https://github.com/zulip/zulip/issues/36339 .
+  final String? stillUrl;
+
+  bool deactivated;
+  final int? authorId;
+```
+— `lib/api/model/model.dart`
+
+Note the JSON `id` **is** the `emoji_code`, and `deactivated` is deliberately mutable
+because `update_one` patches it in place. The `still_url` caveat is a real-world one worth
+copying: **animated emoji uploaded before Zulip 5 may have no `still_url`** despite the
+schema calling it mandatory-but-nullable (zulip/zulip#36339; a backfill migration landed in
+12.0).
+
+All three event ops are handled:
+
+```dart
+  void handleRealmEmojiEvent(RealmEmojiEvent event) {
+    switch (event) {
+      case RealmEmojiAddEvent(:final emoji):
+        allRealmEmoji[emoji.emojiCode] = emoji;
+
+      case RealmEmojiUpdateOneEvent(:final emojiCode, :final data):
+        final realmEmoji = allRealmEmoji[emojiCode];
+        if (realmEmoji == null) return; // TODO(log)
+        if (data.deactivated != null) realmEmoji.deactivated = data.deactivated!;
+
+      case RealmEmojiUpdateEvent(:final realmEmoji):
+        allRealmEmoji = realmEmoji;
+    }
+    _allEmojiCandidates = null;
+  }
+```
+— `lib/model/emoji.dart`
+
+`RealmEmojiUpdateEvent` (the legacy full-replace `op: "update"`) is marked
+`// TODO(server-12): remove` — confirming §3.5's FL 491 transition.
+
+### 11.8 What the compose box inserts
+
+```dart
+      case EmojiAutocompleteResult(:var candidate):
+        replacementString = ':${candidate.emojiName}:';
+      case UserMentionAutocompleteResult(:var userId):
+        replacementString = '${userMention(user, silent: query.silent, users: store)} ';
+      case WildcardMentionAutocompleteResult(:var wildcardOption):
+        replacementString = '${wildcardMention(wildcardOption, store: store)} ';
+      case UserGroupMentionAutocompleteResult(:final groupId):
+        replacementString = '${userGroupMention(userGroup.name, silent: query.silent)} ';
+      case ChannelLinkAutocompleteResult(:final channelId):
+        replacementString = '${channelLink(channel, store: store)} ';
+```
+— `lib/widgets/autocomplete.dart` (`ComposeAutocomplete._onTapOption`)
+
+**Emoji gets no trailing space** here (web adds one) and inserts the *canonical* name, not
+the alias the user typed. Everything else gets one ASCII space.
+
+```dart
+/// An @-mention of an individual user, like @**Chris Bobbe|13313**.
+String userMention(User user, {bool silent = false, UserStore? users}) {
+  bool includeUserId = users == null
+    || users.allUsers.where((u) => u.fullName == user.fullName)
+         .take(2).length == 2;
+  …
+}
+
+String _userMentionImpl({required bool silent, required String fullName, int? userId}) =>
+  '@${silent ? '_' : ''}**$fullName${userId != null ? '|$userId' : ''}**';
+
+String userGroupMention(String userGroupName, {bool silent = false}) =>
+  '@${silent ? '_' : ''}*$userGroupName*';
+
+String channelLink(ZulipStream channel, {required PerAccountStore store}) {
+  if (_channelAvoidedCharsRegex.hasMatch(channel.name)) {
+    return _channelFallbackMarkdownLink(channel, store: store);
+  }
+  return '#**${channel.name}**';
+}
+
+final _channelAvoidedCharsRegex = RegExp(r'[`>*&[\]]|\$\$');
+
+const _channelAvoidedCharsReplacements = {
+  '`': '&#96;', '>': '&gt;', '*': '&#42;', '&': '&amp;',
+  '[': '&#91;', ']': '&#93;', r'$$': '&#36;&#36;',
+};
+```
+— `lib/model/compose.dart`
+
+The avoided-character set is **identical to web's** `invalid_stream_topic_regex` (§8.4), and
+flutter additionally gives the HTML-entity escapes for the fallback link text. Copy both.
+
+Wildcard insertion downgrades `channel` → `stream` on old servers:
+
+```dart
+    case WildcardMentionOption.stream:
+      if (isChannelWildcardAvailable) {
+        name = WildcardMentionOption.channel.canonicalString;
+      }
+```
+
+Topic selection inserts **no markup** — it calls `controller.setTopic(option.topic)`,
+because in flutter the topic is a separate field, not part of the message body.
+
+### 11.9 Channel-link ranking
+
+Three buckets (exact / totalPrefix / wordPrefixes), then a comparator chain:
+composing-to channel → subscribed, ordered **pinned-unmuted > unpinned-unmuted >
+pinned-muted > unpinned-muted** → recently active → weekly traffic → name. Archived
+channels are excluded outright (`if (channel.isArchived) return null;`).
+— `lib/model/autocomplete.dart` (`ChannelLinkAutocompleteQuery`)
+
+Essentially web's `compare_by_activity` (§10.5) with archived channels dropped rather than
+sunk, and with the pin/mute cross-product made explicit.
+
+### 11.10 The two clients disagree — what to take
+
+| question | web | flutter | take |
+|---|---|---|---|
+| case-sensitive match tier | yes | no | **flutter** — flutter's comment says users expect a lowercase query to be enough |
+| bots below humans regardless of match | yes | no (relevance only) | **flutter** — see zulip/zulip#35467 |
+| word matching | one word-boundary bucket | all query words prefix-match name words in order | **flutter** |
+| subscribers ranked first for people | yes | no (`TODO(#618)`) | **web** |
+| groups filtered by `can_mention_group` | yes | no (`TODO(#1776)`) | **web** |
+| emoji usage-frequency reordering | yes, computed locally | no | optional; web's is purely client-side |
+| realm emoji priority | stable partition within each tier | explicit rank buckets 3/4/7 | **flutter** — far easier to reason about |
+| literal-glyph emoji query | broken (no trim/unqualify) | works | **flutter** |
+| trailing space after emoji | yes | no | web's is nicer |
 
 ---
 
@@ -1202,18 +1712,27 @@ _(pending — see §14 if this section is still empty)_
 
 Nothing here is a claim about Zulip; it is what the above implies for an iOS client.
 
-**The source abstraction.** The web client's shape validates the ticket's proposal: the box
-is dumb (`matcher: () => true`, `sorter: items => items`) and every source owns its own
+**The source abstraction.** Both official clients validate the ticket's proposal: the box is
+dumb (web passes `matcher: () => true, sorter: items => items`) and every source owns its own
 matching and ranking. A Swift `AutocompleteSource` needs:
 
-- `trigger: Character` and an "is this position valid" check (shared — §10.1);
+- `trigger: Character` and an "is this position valid" check (shared — §10.1, §11.2);
 - `candidates(query:context:) -> [Suggestion]`, where `context` carries the target channel
   id and topic (people ranking needs both) and the compose mode (DM vs channel, for
   wildcards);
-- per-suggestion `insertionText` (already escaped — §8.4) and display fields.
+- per-suggestion `rank: Int` plus `insertionText` (already escaped — §8.4) and display fields.
 
-A fourth source drops in without touching the box, because triage and the trigger scanner
-are shared and only `candidates` is source-specific.
+A fourth source drops in without touching the box, because the trigger scanner and the
+bucket sort are shared and only `candidates` is source-specific.
+
+**Ranking shape.** Take flutter's: each source pre-sorts its candidate list once (on store
+load / event), then per query assigns a small integer rank and runs a **stable** bucket sort.
+O(n + buckets), no comparator, and the pre-sort is the tiebreak. Avoid web's lazy-getter
+cascade — it exists to dodge work in a language without cheap sorting, and it makes the rules
+hard to read.
+
+**Trigger bounds should come from the server.** Flutter derives its lookback from
+`max_stream_name_length` in `/register` rather than a constant. Do the same.
 
 **Emoji catalogue, one store, two consumers.** The picker and the `:` source should share
 one index:
@@ -1224,8 +1743,15 @@ one index:
   retained for display (§3.2);
 - a synthesized `zulip` entry (§3.1).
 
-Ordering for both: realm emoji first within each match tier, then a popularity list, then
-triage order (§10.6). Skip the skin-tone selector entirely (§4).
+Ordering for both: flutter's nine-bucket rank table (§11.4). With an empty query it degrades
+to "popular six, then realm emoji and `:zulip:`, then everything else" — the picker layout
+the ticket asks for, with no separate code path. Skip the skin-tone selector entirely (§4).
+Resolve every display failure to `:name:` text rather than dropping the emoji (§11.5).
+
+**Fetch `server_emoji_data_url` off the critical path.** It is not needed to render messages,
+only for the picker and `:` autocomplete, and it cannot change without a server restart —
+so fire it after the event queue is up, retry with backoff, and let the picker show only
+realm emoji until it lands (§11.6).
 
 **Correctness items that are easy to get wrong**, ranked by how badly they bite:
 
@@ -1235,7 +1761,10 @@ triage order (§10.6). Skip the skin-tone selector entirely (§4).
 4. Escape-check channel and topic names before emitting `#**...**` (§8.4).
 5. Only emit `@**Name|id**` when the name is ambiguous, and never when the name might be
    stale — the server rejects a mismatch (§8.3).
-6. Deactivated realm emoji stay in the snapshot and their names can be reused (§3.2).
+6. Deactivated realm emoji stay in the snapshot and their names can be reused (§3.2). Look
+   up display against *all* realm emoji; build the picker from *active* ones only (§11.5).
+7. Animated realm emoji uploaded before Zulip 5 may have no `still_url` despite the schema
+   (zulip/zulip#36339) — handle null (§11.7).
 
 **Phone-specific** (the ticket's last bullet) — nothing in any Zulip source addresses a
 suggestion box with the keyboard up; that is Zulu's own design problem. The only transferable
@@ -1271,10 +1800,6 @@ Reaction identity: `(reaction_type, emoji_code)`.
 
 ## 14. What I could not determine
 
-- **`stream_weekly_traffic`.** The web client's `compare_by_activity` reads it, but I did not
-  find it in the `/register` `Subscription` or `BasicChannel` schemas. The nearest documented
-  substitutes are `is_recently_active` and `subscriber_count` on `BasicChannel`. Unresolved
-  whether it is a separate key, a computed value, or has been renamed.
 - **Emoji categories.** No documented API. `emoji_catalog` in `emoji_codes.json` is the only
   server-provided grouping and that file is explicitly described as internal (§2.5). No
   documented display order for the categories either — the key order in the JSON is not it.
@@ -1284,10 +1809,15 @@ Reaction identity: `(reaction_type, emoji_code)`.
 - **Whether `still_url`/`source_url` can ever be absolute.** The schema says "path relative
   to the organization's URL", but the S3 backend returns a full public bucket URL from
   `get_public_upload_url`. I did not find a server-side normalization that guarantees the
-  relative form, so resolve defensively (treat an absolute URL as already resolved).
+  relative form. zulip-flutter resolves both through a generic `tryResolveUrl` against the
+  realm URL, which handles either case — do the same.
 - **Topic autocomplete ranking.** I confirmed the trigger mechanics and that topics come from
   `GET /users/me/{stream_id}/topics`, but not what the web client sorts them by beyond the
-  shared triage.
+  shared triage. zulip-flutter's topic autocomplete is a different shape (a separate topic
+  field, not `#channel>topic` in the body), so it does not answer the question either.
+- **Whether the emoji-frequency heuristic is worth it.** Web computes `frequently_used_emojis`
+  locally from observed reactions; flutter does not implement it at all. No source states
+  which behaviour users prefer.
 - **Nginx-level proof that `/user_avatars/` is unauthenticated.** The Django URL route
   (`serve_local_avatar_unauthed`) is explicit and the live check returns 200 with no
   credentials, but I did not find a matching `location /user_avatars` block in the packaged
