@@ -7,6 +7,8 @@ first-class: a channel that uses them renders as a list of threads, a channel th
 doesn't renders as plain chat, and the app works out which is which. Channels group
 into user-defined folders that sync across your devices.
 
+Minimum iOS 27, built on Liquid Glass.
+
 ## Status
 
 Pre-implementation. The way to the spec is being charted — see
@@ -25,12 +27,9 @@ decisions already locked, and what is still open.
 Each prototype is disposable and self-contained. Run one with its own script:
 
 ```sh
-prototypes/nav-shell/run.sh            # three iPhone navigation shells, A/B/C
-prototypes/nav-shell/run.sh "iPhone Air"  # pick a simulator
+prototypes/nav-shell/run.sh              # the iPhone navigation shell
+prototypes/nav-shell/run.sh "iPhone Air" # pick a simulator
 ```
 
-Flip between variants with the yellow bar, or jump straight to one:
-
-```sh
-SIMCTL_CHILD_VARIANT=C xcrun simctl launch "iPhone 17" com.bwees.zulu.navshell
-```
+`nav-shell` holds the chosen drawer shell. The two rejected shells — a native tab bar
+and a flat topic inbox — are on the `prototype/nav-shell-variants` branch.

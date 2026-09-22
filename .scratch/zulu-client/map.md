@@ -10,6 +10,8 @@ A handoff-ready implementation spec for **Zulu**: a SwiftUI client for iOS and m
 
 **Domain**: Zulip client software. Apple platforms (SwiftUI, GRDB, APNs, iCloud) and a Go backend service.
 
+**Repo**: `github.com/bwees/zulu`. Bundle identifier prefix `com.bwees.zulu`. CI builds on every push and PR.
+
 **Fixed decisions from charting** — these are settled, do not reopen:
 
 - **v1 feature scope** — daily-driver core: read/send, channels + topics, DMs, reactions, replies/quotes, file and image upload/view, markdown compose, unread and mark-read, notification controls, search, auth (SSO + password). Out: polls, todo widgets, drafts sync, scheduled send, edit-history UI, admin/org settings.
@@ -22,30 +24,39 @@ A handoff-ready implementation spec for **Zulu**: a SwiftUI client for iOS and m
 - **Notification controls mirror Zulip's own** per-channel and per-topic settings via the API. No parallel preference store.
 - **Local store is SQLite via GRDB**, local-first: the event queue writes, the UI reads only from the DB.
 - **Code structure**: shared Swift packages for domain, store, API client, and sync; two thin SwiftUI app targets (iOS, macOS) owning their own navigation.
+- **Minimum deployment target is iOS 27** and its macOS contemporary. No back-deployment, no availability branching.
+- **Liquid Glass throughout, per Apple's HIG.** Glass belongs to the navigation and control layer; content stays opaque. Never glass on glass. A consequence learned in the nav prototype: glass bars sample whatever sits behind them in the window, so views underneath must be unmounted rather than merely covered.
 
 **Skills every session should consult**: `/grilling`, `/domain-modeling`. Go tickets also: `/golang-how-to`, `/golang-project-layout`, `/golang-uber-fx`, `/golang-database`, `/golang-security`.
 
-**Mode**: planning only. Produce decisions, not deliverables.
+**Mode**: planning only. Produce decisions, not deliverables — prototypes excepted, since reacting to one is how several of these decisions get made.
 
 ## Decisions so far
 
 <!-- one line per resolved ticket -->
 
+- [Zulip auth for native clients](issues/01-zulip-auth-api.md) — password is `fetch_api_key`; SSO is the undocumented `mobile_flow_otp` browser round-trip. An account has exactly **one** API key, so the app and the service cannot hold separate credentials.
+- [Zulip real-time events API](issues/02-zulip-events-api.md) — `/register` then longpoll `/events`; queues idle out in 10 minutes and recovery is a full re-register. Concurrent queues per key are fine, but holding one suppresses Zulip's own notifications.
+- [Zulip's notification settings model](issues/03-zulip-notification-settings.md) — all four settings layers are readable and writable, and the server's decision is reimplementable, but it is never sent to clients. Personal mentions ignore every mute.
+- [APNs from a Go service, multi-device](issues/04-apns-for-go-senders.md) — `apns-collapse-id` gives notifications a predictable identity for cross-device dismissal; there is no delete API, so foreground reconciliation is the backstop. `sideshow/apns2` is the only real library and is dormant.
+- [Zulip message content model](issues/05-zulip-message-model.md) — render the server's `rendered_content` HTML natively; never re-parse markdown. The topic field is `subject` on the wire.
+- [iPhone navigation shell](issues/06-iphone-navigation.md) — the Discord-style drawer shell wins over a native tab bar and a flat topic inbox. Three levels deep at most; DMs are a rail entry.
+
 ## Not yet specified
 
-- **DM section design.** Discord puts DMs in their own top-level space. How group DMs, DM search, and unread DMs surface on iPhone vs Mac is dim until the navigation shells exist.
-- **Search UX and API mapping.** Zulip's search operators are powerful; which subset gets a UI, and where search lives in each shell, waits on navigation.
-- **File upload and attachment viewing.** Picker, progress, inline image/video rendering, quick-look on Mac.
-- **Message actions.** Reactions picker, quote-reply, edit, delete, move-to-topic — which are in v1's context menu and how they differ per platform.
-- **Connection and error UX.** What the user sees during reconnect, queue expiry, server unreachable, and auth expiry.
-- **Onboarding and account switching flow.** First-run, realm URL entry, sign-out, and token revocation.
+- **DM section design.** Group DMs, DM search, and unread DMs within the chosen drawer shell.
+- **Search UX and API mapping.** Which subset of Zulip's search operators gets a UI, and where search lives in the drawer shell.
+- **File upload and attachment viewing.** Picker, progress, inline rendering, and the authenticated-media fetch path the message-model research pinned down.
+- **Message actions.** Reactions picker, quote-reply, edit, delete, move-to-topic.
+- **Connection and error UX.** Reconnect, queue expiry, server unreachable, auth expiry — and the degraded-notifications state the push-suppression ticket will define.
+- **Onboarding and account switching flow.** First-run, realm URL entry, sign-out, token revocation.
 - **Mac keyboard and menu surface.** Command palette, menu bar, keyboard shortcuts.
+- **Notification Service Extension on macOS.** Reportedly unreliable; gates avatars and communication notifications there. Needs an on-device spike before the Mac notification design is settled.
 - **Testing strategy.** What gets unit tests, what gets snapshot tests, how the Go service is tested against a fake Zulip.
 - **Rate limiting and API etiquette.** Backfill pacing, Zulip's rate limits, service-side request budgeting across many users.
 
 ## Out of scope
 
-- **App Store distribution and review** — signing, notarization, privacy manifests, TestFlight, listing. A separate effort once the app exists.
-- **Visual design system and branding** — colors, typography, app icon, custom component library. The spec uses system SwiftUI styling.
-- **Go service operations** — deployment target, CI/CD, monitoring, backups, scaling past one box. The spec covers the service's design and API, not how it runs.
+- **Visual design system and branding** — colors, typography, app icon, custom component library. The spec uses system SwiftUI styling and Liquid Glass defaults.
+- **Go service operations** — deployment target, monitoring, backups, scaling past one box. Its build and test pipeline is in scope; how it runs in production is not.
 - **Android and web clients** — Apple platforms only.

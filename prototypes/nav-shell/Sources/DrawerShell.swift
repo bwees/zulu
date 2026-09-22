@@ -1,10 +1,9 @@
-// PROTOTYPE — throwaway.
-// Variant A — "Discord faithful": edge rail of groups + channel drawer that the
-// message pane slides off of. Spatial hierarchy, gesture-driven, no tab bar.
+// PROTOTYPE — throwaway. The chosen iPhone navigation shell: an edge rail of channel
+// groups, a channel drawer, and a message pane that slides off it.
+import PhotosUI
 import SwiftUI
 
-struct VariantA: View {
-    static let name = "Discord drawer"
+struct DrawerShell: View {
 
     private enum Sel: Equatable {
         case channel(Int, Int)
@@ -18,6 +17,9 @@ struct VariantA: View {
     @State private var open = true
     @State private var drag: CGFloat = 0
     @State private var path: [Topic] = []
+    @State private var icons: [ChannelGroup.ID: Data] = [:]
+    @State private var iconTarget: ChannelGroup.ID?
+    @State private var pickedIcon: PhotosPickerItem?
 
     private let railW: CGFloat = 80
     private let listW: CGFloat = 236
@@ -87,15 +89,24 @@ struct VariantA: View {
 
                 ForEach(Array(Fake.groups.enumerated()), id: \.element.id) { i, g in
                     railButton(
-                        label: { Text(g.initials).font(.system(size: 15, weight: .bold)) },
+                        label: { groupFace(g) },
                         tint: g.tint,
                         active: section == .group(i),
                         badge: g.unread,
-                        mention: g.mentions > 0
+                        mention: g.mentions > 0,
+                        opaque: icons[g.id] != nil
                     ) {
                         section = .group(i)
                         sel = .channel(i, 0)
                         path = []
+                    }
+                    .contextMenu {
+                        Button("Change icon", systemImage: "photo") { iconTarget = g.id }
+                        if icons[g.id] != nil {
+                            Button("Remove icon", systemImage: "trash", role: .destructive) {
+                                icons[g.id] = nil
+                            }
+                        }
                     }
                 }
 
@@ -106,6 +117,28 @@ struct VariantA: View {
         .scrollEdgeEffectStyle(.soft, for: .all)
         .frame(width: railW)
         .background(Color(.secondarySystemGroupedBackground).ignoresSafeArea(edges: .vertical))
+        .photosPicker(
+            isPresented: Binding(get: { iconTarget != nil }, set: { if !$0 { iconTarget = nil } }),
+            selection: $pickedIcon,
+            matching: .images
+        )
+        .task(id: pickedIcon) {
+            guard let pickedIcon, let target = iconTarget else { return }
+            icons[target] = try? await pickedIcon.loadTransferable(type: Data.self)
+            self.pickedIcon = nil
+            iconTarget = nil
+        }
+    }
+
+    @ViewBuilder
+    private func groupFace(_ g: ChannelGroup) -> some View {
+        if let data = icons[g.id], let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            Text(g.initials).font(.system(size: 15, weight: .bold))
+        }
     }
 
     private func railButton<L: View>(
@@ -114,17 +147,25 @@ struct VariantA: View {
         active: Bool,
         badge: Int,
         mention: Bool,
+        opaque: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let shape = RoundedRectangle(cornerRadius: active ? 14 : 23)
+        return Button(action: action) {
             ZStack(alignment: .topTrailing) {
                 label()
                     .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                     .frame(width: 46, height: 46)
+                    .clipShape(shape)
                     .glassEffect(
-                        .regular.tint(active ? tint : nil).interactive(),
-                        in: .rect(cornerRadius: active ? 14 : 23)
+                        .regular.tint(active && !opaque ? tint : nil).interactive(),
+                        in: shape
                     )
+                    .overlay {
+                        if opaque && active {
+                            shape.stroke(tint, lineWidth: 2.5)
+                        }
+                    }
                 Badge(count: badge, mention: mention).offset(x: 6, y: -4)
             }
             .overlay(alignment: .leading) {
@@ -180,10 +221,9 @@ struct VariantA: View {
             withAnimation(.snappy) { open = false }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: c.mode == .forum ? "list.bullet.indent" : "number")
-                    .font(.footnote)
+                ChannelIcon(mode: c.mode, restricted: c.restricted)
                     .foregroundStyle(.secondary)
-                    .frame(width: 16)
+                    .frame(width: 26, alignment: .leading)
                 Text(c.name)
                     .font(.subheadline.weight(c.unread > 0 ? .semibold : .regular))
                     .foregroundStyle(c.unread > 0 ? .primary : .secondary)

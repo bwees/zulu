@@ -17,6 +17,37 @@ struct Badge: View {
     }
 }
 
+struct ChannelIcon: View {
+    let mode: ChannelMode
+    var restricted = false
+    var size: CGFloat = 15
+
+    private var symbol: String {
+        switch mode {
+        case .forum: "bubble.left.and.text.bubble.right"
+        case .chat: "number"
+        }
+    }
+
+    /// The colour the icon sits on, so the lock's bubble reads as a hole punched
+    /// through the glyph rather than a disc floating over it.
+    var cutout: Color = Color(.systemGroupedBackground)
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size))
+            .overlay(alignment: .topTrailing) {
+                if restricted {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: size * 0.5, weight: .bold))
+                        .padding(size * 0.14)
+                        .background(cutout, in: Circle())
+                        .offset(x: size * 0.34, y: -size * 0.2)
+                }
+            }
+    }
+}
+
 struct UnreadDot: View {
     let on: Bool
     var body: some View {

@@ -27,6 +27,7 @@ struct Channel: Identifiable {
     let id = UUID()
     let name: String
     let mode: ChannelMode
+    var restricted = false
     var mentions: Int = 0
     var topics: [Topic]
     var unread: Int { topics.filter { !$0.muted }.reduce(0) { $0 + $1.unread } }
@@ -103,7 +104,7 @@ enum Fake {
                     ("sam", "the muted rows fail AA", "Sun"),
                 ])),
             ]),
-            Channel(name: "releases", mode: .forum, topics: [
+            Channel(name: "releases", mode: .forum, restricted: true, topics: [
                 Topic(name: "2026.9.1", unread: 0, lastSender: "ci", preview: "build 4471 promoted", when: "7:02", messages: msgs([
                     ("ci", "build 4471 promoted", "7:02"),
                 ])),
@@ -144,7 +145,7 @@ enum Fake {
             ]),
         ]),
         ChannelGroup(name: "Home Lab", initials: "HL", tint: .green, channels: [
-            Channel(name: "infra", mode: .chat, topics: [
+            Channel(name: "infra", mode: .chat, restricted: true, topics: [
                 Topic(name: "general", unread: 0, lastSender: "bwees", preview: "moved the NAS to 10G", when: "Sat", messages: msgs([
                     ("bwees", "moved the NAS to 10G", "Sat"),
                 ]))
