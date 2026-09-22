@@ -382,3 +382,32 @@ extension AppModel {
         try? store?.setChannels(ids, inGroup: groupID)
     }
 }
+
+// MARK: - History
+
+extension AppModel {
+    /// Fetches the page of messages older than `oldestHeld`, and reports whether anything
+    /// older still exists.
+    ///
+    /// End of history is `found_oldest`, never an empty page: a narrow that matches nothing
+    /// returns zero messages and both flags true, which is a different thing entirely.
+    /// `history_limited` is its own answer — more once existed, but retention removed it.
+    func loadOlder(channelID: Int, topic: String, before oldestHeld: Int) async -> Bool {
+        await loadOlder(narrow: [.channel(channelID), .topic(topic)], before: oldestHeld)
+    }
+
+    func loadOlder(dmKey: String, before oldestHeld: Int) async -> Bool {
+        let ids = dmKey.split(separator: ",").compactMap { Int($0) }
+        return await loadOlder(narrow: [.dm(ids)], before: oldestHeld)
+    }
+
+    private func loadOlder(narrow: [NarrowFilter], before oldestHeld: Int) async -> Bool {
+        guard let client, let store, let account else { return false }
+        guard let page = try? await client.messages(
+            narrow: narrow, anchor: .id(oldestHeld), before: 50, after: 0, includeAnchor: false
+        ) else { return false }
+
+        try? store.save(messages: page.messages, selfUserID: account.userID)
+        return !page.found_oldest && !(page.history_limited ?? false)
+    }
+}

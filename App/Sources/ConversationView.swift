@@ -28,6 +28,8 @@ struct ConversationView: View {
     /// moment the messages behind it are marked read.
     @State private var firstUnreadID: Int?
     @State private var readTracker: ReadTracker?
+    @State private var moreHistoryExists = true
+    @State private var loadingOlder = false
 
     /// Five minutes, matching what Discord and Slack settle on.
     private static let groupingWindow = 5 * 60
@@ -36,6 +38,11 @@ struct ConversationView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if loadingOlder {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
                     ForEach(grouped, id: \.message.id) { entry in
                         if entry.message.id == firstUnreadID {
                             UnreadDivider()
@@ -60,6 +67,14 @@ struct ConversationView: View {
                 return distance < 120
             } action: { _, isNearBottom in
                 atBottom = isNearBottom
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                // Ask for more while the top is still a screen away, so the wait
+                // happens before the reader reaches the end of what is held.
+                geometry.contentOffset.y < geometry.containerSize.height
+            } action: { _, isNearTop in
+                guard isNearTop else { return }
+                Task { await loadOlderIfNeeded(proxy: proxy) }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom {
@@ -114,6 +129,7 @@ struct ConversationView: View {
             EmojiPicker { draft.append($0) }
         }
         .task(id: source) {
+            moreHistoryExists = true
             readTracker = ReadTracker { ids in await model.markRead(ids) }
             await load()
         }
@@ -245,6 +261,23 @@ struct ConversationView: View {
         } catch {
             // Observation ends when the view goes away; nothing to recover.
         }
+    }
+
+    /// Keeps the reader's place: fetching older messages grows the list upward, so the
+    /// message they were looking at has to be pinned or the view jumps.
+    private func loadOlderIfNeeded(proxy: ScrollViewProxy) async {
+        guard moreHistoryExists, !loadingOlder, let oldest = messages.first?.id else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+
+        let more: Bool = switch source {
+        case .topic(let channelID, let name, _):
+            await model.loadOlder(channelID: channelID, topic: name, before: oldest)
+        case .dm(let key):
+            await model.loadOlder(dmKey: key, before: oldest)
+        }
+        moreHistoryExists = more
+        proxy.scrollTo(oldest, anchor: .top)
     }
 
     private func send() async {
