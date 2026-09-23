@@ -12,7 +12,7 @@ targets:
   Zulu:
     type: application
     platform: iOS
-    sources: [Sources, ../Shared/Sources]
+    sources: [Sources, Assets.xcassets, ../Shared/Sources]
     dependencies:
       - package: ZuluKit
         product: ZulipAPI
@@ -51,6 +51,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -60,15 +61,16 @@ targets:
         # command line with the commit count, so the checked-in value never reaches
         # App Store Connect.
         CURRENT_PROJECT_VERSION: "1"
-        # DEVELOPMENT_TEAM and CODE_SIGN_STYLE are deliberately absent. A team here
-        # gives the app a real application-identifier, which moves its default
-        # keychain access group and hides the API key AccountStorage already wrote.
-        # Signing settings are passed to the release archive by xcodebuild instead.
+        # A device build now carries a real application-identifier, which moves its
+        # keychain access group. One already signed in reads back no API key and
+        # lands on the login screen once. Simulator builds stay unsigned and unaffected.
+        DEVELOPMENT_TEAM: 65AMD2STXG
+        CODE_SIGN_STYLE: Automatic
 
   ZuluMac:
     type: application
     platform: macOS
-    sources: [../Mac/Sources, ../Shared/Sources]
+    sources: [../Mac/Sources, ../Mac/Assets.xcassets, ../Shared/Sources]
     dependencies:
       - package: ZuluKit
         product: ZulipAPI
@@ -105,9 +107,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
-        # Same reasoning as the iOS target: a team here moves the keychain access
-        # group out from under what AccountStorage already wrote.
+        # The team only chooses the signing identity here. Nothing in the entitlements
+        # needs a provisioning profile, so the Mac build gets no keychain access group
+        # and SecretStore goes on writing to the sandbox container.
+        DEVELOPMENT_TEAM: 65AMD2STXG
+        CODE_SIGN_STYLE: Automatic

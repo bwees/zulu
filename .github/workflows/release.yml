@@ -91,10 +91,10 @@ jobs:
         run: |
           set -euo pipefail
           xcodegen generate
-          # DEVELOPMENT_TEAM lives here and not in project.yml: a team in project.yml
-          # would also apply to the simulator build, whose keychain items were written
-          # under the untethered access group. CODE_SIGN_IDENTITY is not set alongside
-          # it — automatic signing rejects a manually chosen identity outright.
+          # DEVELOPMENT_TEAM repeats what project.yml already sets, so a fork building
+          # under its own team overrides it from APPLE_TEAM_ID alone. CODE_SIGN_IDENTITY
+          # is not set alongside it. Automatic signing rejects a manually chosen identity
+          # outright.
           xcodebuild archive \
             -project Zulu.xcodeproj \
             -scheme Zulu \
