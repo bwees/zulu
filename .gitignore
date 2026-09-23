@@ -5,14 +5,14 @@
 
 # build output
 build/
+build-device/
 DerivedData/
 .build/
+.swiftpm/
+Package.resolved
 xcuserdata/
 *.xcuserstate
 
 # go
 /bin/
 *.db
-.swiftpm/
-Package.resolved
-build-device/
