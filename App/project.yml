@@ -43,6 +43,13 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # App Store Connect rejects an iPad build without every orientation, since
+        # iPad multitasking can put the app in any of them.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # The Zulip server hardcodes a zulip:// redirect for the SSO flow, so the
         # scheme is not ours to choose.
         CFBundleURLTypes:
