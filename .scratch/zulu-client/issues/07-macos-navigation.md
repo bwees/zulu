@@ -37,6 +37,10 @@ Settled with it:
   New Topic button. The page is also behind an All Topics button in the toolbar of any
   topic in the channel and in the row's context menu. A chat channel opens straight into
   its one conversation.
+- **A direct message that needs an answer is pinned above the channels** of whatever
+  section is showing, under its own header, so switching the rail to a group never hides
+  a new DM. It stays pinned while it is the open conversation rather than vanishing the
+  moment it is read.
 - **Selection is the model's destination**, shared with iOS and remembered across launches.
   The rail follows it: opening something from ⌘K or a notification switches the sidebar to
   the group that holds it.

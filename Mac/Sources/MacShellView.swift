@@ -168,6 +168,14 @@ struct MacShellView: View {
     /// does not respond.
     private var list: some View {
         List(selection: destinationBinding) {
+            // A direct message that needs an answer is pinned above whatever section is
+            // showing, so it is never hidden behind a rail switch. It stays while it is
+            // the open conversation, rather than vanishing the moment it is read.
+            if ui.section != .dms, !pinnedDMs.isEmpty {
+                Section("Direct Messages") {
+                    ForEach(pinnedDMs) { dm in dmRow(dm) }
+                }
+            }
             // The column's navigation title does not render on macOS 26, so the section
             // says what it is at the top of the list, the way Mail's sidebar does.
             Section(listTitle) {
@@ -175,6 +183,21 @@ struct MacShellView: View {
             }
         }
         .listStyle(.sidebar)
+    }
+
+    private var pinnedDMs: [DMSummary] {
+        model.dms.filter { $0.unreadCount > 0 || model.destination == .dm($0.dmKey) }
+    }
+
+    private func dmRow(_ dm: DMSummary) -> some View {
+        MacDMRow(dm: dm)
+            .tag(AppModel.Destination.dm(dm.dmKey))
+            .contextMenu {
+                Button("Mark as Read") {
+                    Task { await model.markConversationRead(.dm(key: dm.dmKey)) }
+                }
+                .disabled(dm.unreadCount == 0)
+            }
     }
 
     @ViewBuilder
@@ -186,16 +209,7 @@ struct MacShellView: View {
                     .foregroundStyle(.secondary)
                     .selectionDisabled()
             }
-            ForEach(model.dms) { dm in
-                MacDMRow(dm: dm)
-                    .tag(AppModel.Destination.dm(dm.dmKey))
-                    .contextMenu {
-                        Button("Mark as Read") {
-                            Task { await model.markConversationRead(.dm(key: dm.dmKey)) }
-                        }
-                        .disabled(dm.unreadCount == 0)
-                    }
-            }
+            ForEach(model.dms) { dm in dmRow(dm) }
         } else {
             ForEach(entries) { entry in
                 switch entry {
@@ -650,7 +664,11 @@ struct MacRail: View {
                 .help("New Group  ⇧⌘G")
             }
             .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
         }
+        // The scroll view clips to its content, and a mention badge hangs off the
+        // corner of a button on purpose; without this the count is cut in half.
+        .scrollClipDisabled()
         .frame(width: Self.width)
         .scrollIndicators(.never)
         .background(.quaternary.opacity(0.35))

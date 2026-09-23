@@ -16,6 +16,7 @@ struct MessageReactionsRow: View {
     #if os(macOS)
     @State private var hoveredGroup: String?
     @State private var hoverTask: Task<Void, Never>?
+    @State private var bubbleHeight: CGFloat = 30
     #endif
 
     var body: some View {
@@ -80,7 +81,10 @@ struct MessageReactionsRow: View {
         .overlay(alignment: .topLeading) {
             if hoveredGroup == group.id {
                 ReactorBubble(names: reactorNames(of: group), emojiName: group.emojiName)
-                    .alignmentGuide(.top) { $0[.bottom] + 6 }
+                    // Lifted by its own height, measured, so it clears the chip whether
+                    // it is one line or two. An alignment guide was not honoured here.
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { bubbleHeight = $0 }
+                    .offset(y: -(bubbleHeight + 6))
                     .transition(.opacity)
             }
         }
