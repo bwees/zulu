@@ -26,21 +26,38 @@ struct MacShellView: View {
     @State private var sectionFollowedDestination = false
 
     var body: some View {
+        alerts(sheets(split))
+    }
+
+    /// The split view and the state it keeps in step. Its presentations hang off it in
+    /// two further steps, because one chain of fifteen modifiers is more than the type
+    /// checker will take in a single expression.
+    private var split: some View {
         @Bindable var ui = ui
-        NavigationSplitView(columnVisibility: $columns) {
+        return NavigationSplitView(columnVisibility: $columns) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 300, ideal: 330, max: 480)
         } detail: {
             MacDetailView()
         }
+        .overlay {
+            if let item = ui.viewingImage {
+                MacImageViewer(item: item) { ui.viewingImage = nil }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: ui.viewingImage)
         .task(id: ui.section) { await observe() }
         // The remembered destination comes back before the groups do, so the section
         // follows it once the groups are known — and only once, or switching sections
         // by hand would keep snapping back.
         .onChange(of: model.groups.count, initial: true) {
             guard !sectionFollowedDestination, let destination = model.destination else { return }
-            sectionFollowedDestination = true
             ui.section = section(for: destination)
+            // The first pass runs before the groups observation has delivered anything,
+            // and lands every channel in "unfiled". Only a pass that could see the groups
+            // settles it; if the realm has none, nothing ever changes the count again.
+            sectionFollowedDestination = !model.groups.isEmpty
         }
         .onChange(of: model.pendingGroupToEdit) { _, id in
             guard let id else { return }
@@ -51,68 +68,78 @@ struct MacShellView: View {
         .onChange(of: dockBadge, initial: true) { _, count in
             NSApp.dockTile.badgeLabel = count > 0 ? String(count) : nil
         }
-        .sheet(isPresented: $ui.showingQuickSwitcher) { MacQuickSwitcher() }
-        .sheet(isPresented: $ui.showingNewMessage) { MacNewMessageSheet() }
-        .sheet(isPresented: $ui.showingHidden) { MacHiddenChannelsSheet() }
-        .sheet(item: $ui.newTopicChannel) { box in MacNewTopicSheet(channel: box.channel) }
-        .sheet(item: $ui.editingGroup) { box in MacGroupEditor(groupID: box.id) }
-        .alert("New Group", isPresented: $ui.showingNewGroup) {
-            TextField("Name", text: $newGroupName)
-            Button("Cancel", role: .cancel) { newGroupName = "" }
-            Button("Create") {
-                let name = newGroupName.trimmingCharacters(in: .whitespaces)
-                newGroupName = ""
-                guard !name.isEmpty else { return }
-                model.createGroup(named: name)
+    }
+
+    private func sheets(_ content: some View) -> some View {
+        @Bindable var ui = ui
+        return content
+            .sheet(isPresented: $ui.showingQuickSwitcher) { MacQuickSwitcher() }
+            .sheet(isPresented: $ui.showingNewMessage) { MacNewMessageSheet() }
+            .sheet(isPresented: $ui.showingHidden) { MacHiddenChannelsSheet() }
+            .sheet(item: $ui.newTopicChannel) { box in MacNewTopicSheet(channel: box.channel) }
+            .sheet(item: $ui.editingGroup) { box in MacGroupEditor(groupID: box.id) }
+    }
+
+    private func alerts(_ content: some View) -> some View {
+        @Bindable var ui = ui
+        return content
+            .alert("New Group", isPresented: $ui.showingNewGroup) {
+                TextField("Name", text: $newGroupName)
+                Button("Cancel", role: .cancel) { newGroupName = "" }
+                Button("Create") {
+                    let name = newGroupName.trimmingCharacters(in: .whitespaces)
+                    newGroupName = ""
+                    guard !name.isEmpty else { return }
+                    model.createGroup(named: name)
+                }
+            } message: {
+                Text("Group channels however you like. Groups stay on your devices — Zulip never learns they exist.")
             }
-        } message: {
-            Text("Group channels however you like. Groups stay on your devices — Zulip never learns they exist.")
-        }
-        .alert("Rename for Me", isPresented: Binding(
-            get: { renamingChannel != nil },
-            set: { if !$0 { renamingChannel = nil } }
-        )) {
-            TextField("Name", text: $aliasDraft)
-            Button("Cancel", role: .cancel) {}
-            if let channel = renamingChannel, model.alias(forChannel: channel.id) != nil {
+            .alert("Rename for Me", isPresented: Binding(
+                get: { renamingChannel != nil },
+                set: { if !$0 { renamingChannel = nil } }
+            )) {
+                TextField("Name", text: $aliasDraft)
+                Button("Cancel", role: .cancel) {}
+                if let channel = renamingChannel, model.alias(forChannel: channel.id) != nil {
+                    Button("Use Real Name", role: .destructive) {
+                        model.setAlias(nil, forChannel: channel.id)
+                    }
+                }
+                Button("Save") {
+                    if let channel = renamingChannel { model.setAlias(aliasDraft, forChannel: channel.id) }
+                }
+            } message: {
+                Text("Only you see this name. Mentions and links still use the real one.")
+            }
+            .alert("Rename for Me", isPresented: Binding(
+                get: { renamingPromoted != nil },
+                set: { if !$0 { renamingPromoted = nil } }
+            )) {
+                TextField("Name", text: $aliasDraft)
+                Button("Cancel", role: .cancel) {}
                 Button("Use Real Name", role: .destructive) {
-                    model.setAlias(nil, forChannel: channel.id)
+                    if let p = renamingPromoted {
+                        model.setAlias(nil, forPromotedTopic: p.topic, inChannel: p.channelID)
+                    }
                 }
-            }
-            Button("Save") {
-                if let channel = renamingChannel { model.setAlias(aliasDraft, forChannel: channel.id) }
-            }
-        } message: {
-            Text("Only you see this name. Mentions and links still use the real one.")
-        }
-        .alert("Rename for Me", isPresented: Binding(
-            get: { renamingPromoted != nil },
-            set: { if !$0 { renamingPromoted = nil } }
-        )) {
-            TextField("Name", text: $aliasDraft)
-            Button("Cancel", role: .cancel) {}
-            Button("Use Real Name", role: .destructive) {
-                if let p = renamingPromoted {
-                    model.setAlias(nil, forPromotedTopic: p.topic, inChannel: p.channelID)
+                Button("Save") {
+                    if let p = renamingPromoted {
+                        model.setAlias(aliasDraft, forPromotedTopic: p.topic, inChannel: p.channelID)
+                    }
                 }
+            } message: {
+                Text("Only you see this name.")
             }
-            Button("Save") {
-                if let p = renamingPromoted {
-                    model.setAlias(aliasDraft, forPromotedTopic: p.topic, inChannel: p.channelID)
-                }
+            .confirmationDialog(
+                "Sign out of \(model.account?.email ?? "this account")?",
+                isPresented: $ui.confirmingSignOut,
+                titleVisibility: .visible
+            ) {
+                Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
+            } message: {
+                Text("Your channel groups, renames and hidden channels on this Mac are removed with it.")
             }
-        } message: {
-            Text("Only you see this name.")
-        }
-        .confirmationDialog(
-            "Sign out of \(model.account?.email ?? "this account")?",
-            isPresented: $ui.confirmingSignOut,
-            titleVisibility: .visible
-        ) {
-            Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
-        } message: {
-            Text("Your channel groups, renames and hidden channels on this Mac are removed with it.")
-        }
     }
 
     /// Mentions and direct messages only: a number for every unread message in every

@@ -12,6 +12,9 @@ struct RemoteImage: View {
     var aspectRatio: Double?
 
     @Environment(AppModel.self) private var model
+    #if os(macOS)
+    @Environment(MacUIState.self) private var ui
+    #endif
     @State private var image: Image?
     @State private var failed = false
 
@@ -38,16 +41,18 @@ struct RemoteImage: View {
         }
         .frame(maxWidth: 320, alignment: .leading)
         #if os(macOS)
-        // A click opens the original in the browser, which already holds the realm's
-        // session and can show it at full size. The pointer says so on the way in.
+        // A click expands the image in the window, at the size it was uploaded. The
+        // pointer says so on the way in.
         .onHover { inside in
-            guard fullSizeURL != nil else { return }
+            guard image != nil else { return }
             inside ? NSCursor.pointingHand.push() : NSCursor.pop()
         }
         .onTapGesture {
-            if let url = fullSizeURL { NSWorkspace.shared.open(url) }
+            guard image != nil else { return }
+            ui.viewingImage = MacImageViewerItem(
+                preview: path, fullSize: fullSize, alt: alt, aspectRatio: aspectRatio
+            )
         }
-        .help(fullSizeURL == nil ? "" : "Open full size")
         #endif
         .task(id: path) {
             guard image == nil else { return }

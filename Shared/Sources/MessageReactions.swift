@@ -13,6 +13,10 @@ struct MessageReactionsRow: View {
 
     @Environment(AppModel.self) private var model
     @State private var showingReactors: ReactionGroup?
+    #if os(macOS)
+    @State private var hoveredGroup: String?
+    @State private var hoverTask: Task<Void, Never>?
+    #endif
 
     var body: some View {
         if !groups.isEmpty {
@@ -22,6 +26,19 @@ struct MessageReactionsRow: View {
                 }
             }
             .padding(.top, 4)
+        }
+    }
+
+    /// "You, Ada and Grace", the way a person would say it, with you first because the
+    /// question a chip answers is usually "did I already?".
+    private func reactorNames(of group: ReactionGroup) -> String {
+        let selfID = model.selfUserID
+        let others = group.userIDs.filter { $0 != selfID }.map(model.name(forUser:)).sorted()
+        let names = (group.includesSelf ? ["You"] : []) + others
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        default: return names.dropLast().joined(separator: ", ") + " and " + names.last!
         }
     }
     private func chip(_ group: ReactionGroup) -> some View {
@@ -54,8 +71,34 @@ struct MessageReactionsRow: View {
         // Plain and small: a glass capsule per reaction turned a row of chips into
         // a row of buttons competing with the message above them.
         .buttonStyle(.plain)
-        // A tooltip is how a Mac answers "who?"; the long press stays for touch.
-        .help(group.userIDs.map(model.name(forUser:)).sorted().joined(separator: ", "))
+        #if os(macOS)
+        // Hovering answers "who?" with a bubble above the chip. Drawn in the view
+        // rather than as a popover, so the pointer resting on a reaction never takes
+        // keyboard focus away from the composer.
+        // Hung from the chip's leading edge rather than centred on it: chips sit at
+        // the left of the column, and a centred bubble ran off the edge and was clipped.
+        .overlay(alignment: .topLeading) {
+            if hoveredGroup == group.id {
+                ReactorBubble(names: reactorNames(of: group), emojiName: group.emojiName)
+                    .alignmentGuide(.top) { $0[.bottom] + 6 }
+                    .transition(.opacity)
+            }
+        }
+        .onHover { inside in
+            hoverTask?.cancel()
+            if inside {
+                hoverTask = Task {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.12)) { hoveredGroup = group.id }
+                }
+            } else if hoveredGroup == group.id {
+                withAnimation(.easeOut(duration: 0.12)) { hoveredGroup = nil }
+            }
+        }
+        #else
+        .help(reactorNames(of: group))
+        #endif
         .onLongPressGesture { showingReactors = group }
         .popover(item: $showingReactors) { group in
             ReactorList(names: group.userIDs.map(model.name(forUser:)).sorted())
@@ -64,6 +107,29 @@ struct MessageReactionsRow: View {
         .accessibilityLabel("\(group.emojiName), \(group.count)")
     }
 }
+
+#if os(macOS)
+/// The hover bubble over a reaction chip: who, in bold, and with what.
+private struct ReactorBubble: View {
+    let names: String
+    let emojiName: String
+
+    var body: some View {
+        (Text(names).fontWeight(.semibold) + Text(" reacted with :\(emojiName):"))
+            .font(.callout)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 320)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+            .fixedSize()
+            .allowsHitTesting(false)
+    }
+}
+#endif
 
 private struct ReactorList: View {
     let names: [String]

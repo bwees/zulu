@@ -49,7 +49,13 @@ Settled with it:
   file uploads. Automatic capitalisation, spelling correction and inline prediction are off:
   a chat line is not a sentence and a markdown composer cannot have the system rewriting it.
 - **Message actions are a hover bar and a context menu**, not the phone's long-press sheet:
-  the realm's three most-used reactions, add reaction, reply, and a more menu.
+  the realm's three most-used reactions, add reaction, reply, and a more menu. Hovering a
+  reaction chip shows who, in a bubble drawn in the view — `.help()` never fired on a chip
+  on macOS 26, and a popover would have taken keyboard focus from the composer.
+- **An inline image expands in the window**, over a dimmed backdrop, at the size it was
+  uploaded. The browser has to be signed in to show an upload at all, and a picture someone
+  just posted is not worth leaving the conversation for. Escape, the close button, or a
+  click on the backdrop dismisses; a button opens it in the browser for anyone who wants that.
 - **The Mac keyboard and menu surface** the map left open is now built: File › New Message
   (⌘N), New Topic (⇧⌘N), New Group (⇧⌘G); Go › Jump to… (⌘K) and the sections;
   Conversation › Mark as Read (⇧⎋), Focus Composer (⇧⌘L); Settings (⌘,) with account and
