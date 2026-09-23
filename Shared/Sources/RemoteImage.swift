@@ -37,6 +37,18 @@ struct RemoteImage: View {
             }
         }
         .frame(maxWidth: 320, alignment: .leading)
+        #if os(macOS)
+        // A click opens the original in the browser, which already holds the realm's
+        // session and can show it at full size. The pointer says so on the way in.
+        .onHover { inside in
+            guard fullSizeURL != nil else { return }
+            inside ? NSCursor.pointingHand.push() : NSCursor.pop()
+        }
+        .onTapGesture {
+            if let url = fullSizeURL { NSWorkspace.shared.open(url) }
+        }
+        .help(fullSizeURL == nil ? "" : "Open full size")
+        #endif
         .task(id: path) {
             guard image == nil else { return }
             if let data = await model.imageData(at: path), let decoded = Platform.image(from: data) {
@@ -45,6 +57,17 @@ struct RemoteImage: View {
                 failed = true
             }
         }
+    }
+}
+
+extension RemoteImage {
+    /// The full-size upload, resolved against the realm since the server hands out a
+    /// realm-relative path. `nil` when the message carried no link, in which case there is
+    /// nothing bigger to see.
+    @MainActor
+    var fullSizeURL: URL? {
+        guard let fullSize, !fullSize.isEmpty else { return nil }
+        return URL(string: fullSize, relativeTo: RealmContext.realmURL)?.absoluteURL
     }
 }
 

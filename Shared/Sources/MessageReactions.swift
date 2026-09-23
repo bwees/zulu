@@ -54,6 +54,8 @@ struct MessageReactionsRow: View {
         // Plain and small: a glass capsule per reaction turned a row of chips into
         // a row of buttons competing with the message above them.
         .buttonStyle(.plain)
+        // A tooltip is how a Mac answers "who?"; the long press stays for touch.
+        .help(group.userIDs.map(model.name(forUser:)).sorted().joined(separator: ", "))
         .onLongPressGesture { showingReactors = group }
         .popover(item: $showingReactors) { group in
             ReactorList(names: group.userIDs.map(model.name(forUser:)).sorted())

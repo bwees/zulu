@@ -1,17 +1,21 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import ZuluStore
 
 /// One conversation on the Mac: the same message history the phone shows, with a
-/// composer that sends on Return.
+/// composer that sends on Return and a hover bar on every message.
 struct MacConversationView: View {
     let source: ConversationSource
 
     @Environment(AppModel.self) private var model
+    @Environment(MacUIState.self) private var ui
 
     @State private var loader: MessageHistoryLoader?
     @State private var readTracker: ReadTracker?
     @State private var scroll = ScrollPosition(idType: Int.self)
     @State private var atBottom = true
+    @State private var quickReactions: [QuickReaction] = []
+    @State private var dropTargeted = false
 
     var body: some View {
         Group {
@@ -21,19 +25,63 @@ struct MacConversationView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             MacComposerBar(source: source, placeholder: placeholder)
         }
+        .overlay {
+            if dropTargeted {
+                MacDropHint()
+            }
+        }
+        // Anything dragged in from the Finder is an attachment, wherever it lands.
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard !files.isEmpty else { return false }
+            Task { await model.uploadAndDeliver(files: files, to: ConversationKey.of(source)) }
+            return true
+        } isTargeted: { dropTargeted = $0 }
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         // Without a background the title sits directly on top of the newest message.
         .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbar {
+            if let forum = forumChannel {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        ui.newTopicChannel = ChannelSummaryBox(channel: forum)
+                    } label: {
+                        Label("New Topic", systemImage: "square.and.pencil")
+                    }
+                    .help("New topic in #\(forum.name)  ⇧⌘N")
+                }
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    Task { await model.markConversationRead(source) }
+                } label: {
+                    Label("Mark as Read", systemImage: "checkmark.circle")
+                }
+                .disabled(unreadCount == 0)
+                .help("Mark as Read  ⇧⎋")
+            }
+        }
+        .environment(\.macQuickReactions, quickReactions)
         .task(id: source) {
             let loader = MessageHistoryLoader(source: source, model: model)
             self.loader = loader
             readTracker = ReadTracker { ids in await model.markRead(ids) }
             await loader.start()
+            // A conversation always opens at its live edge, so opening it is reaching
+            // the end of it.
             await model.markConversationRead(source)
+        }
+        .task {
+            // The hover bar's emoji are the realm's habits, looked up once per
+            // conversation rather than once per message hovered.
+            quickReactions = MacQuickReactionsLoader.load(model: model)
+        }
+        .onChange(of: ui.markReadRequests) {
+            Task { await model.markConversationRead(source) }
         }
         .onDisappear {
             loader?.stop()
@@ -45,7 +93,9 @@ struct MacConversationView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if loader.isLoadingOlder {
-                    ProgressView().frame(maxWidth: .infinity).frame(height: 44)
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).frame(height: 36)
+                } else if !loader.hasMoreOlder, !loader.messages.isEmpty {
+                    MacConversationStart(title: title)
                 }
                 ForEach(loader.grouped) { entry in
                     VStack(alignment: .leading, spacing: 0) {
@@ -57,24 +107,16 @@ struct MacConversationView: View {
                             startsGroup: entry.startsGroup,
                             reactions: loader.reactions[entry.message.id] ?? []
                         )
-                        .padding(.top, entry.startsGroup ? 14 : 2)
+                        .padding(.top, entry.startsGroup ? 12 : 1)
+                        .padding(.bottom, 1)
+                        .macMessageActions(entry.message, in: source)
                     }
                     .onAppear { readTracker?.sawMessage(id: entry.message.id) }
-                    // A pointer has no swipe, so the reply affordance is the hover
-                    // action a Mac user would look for instead.
-                    .contextMenu {
-                        Button("Reply") {
-                            ComposerInbox.shared.deliver(
-                                reply: ReplyDraft(message: entry.message),
-                                to: ConversationKey.of(source)
-                            )
-                        }
-                    }
                     .id(entry.message.id)
                 }
             }
             .scrollTargetLayout()
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 12)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -94,6 +136,26 @@ struct MacConversationView: View {
                 Task { await model.markConversationRead(source) }
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if !atBottom {
+                Button {
+                    withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
+                } label: {
+                    Image(systemName: "arrow.down")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 30, height: 30)
+                        .background(.regularMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(.quaternary))
+                        .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 20)
+                .padding(.bottom, 12)
+                .transition(.scale.combined(with: .opacity))
+                .help("Jump to newest")
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: atBottom)
         .onChange(of: loader.messages.last?.id) { _, newest in
             guard atBottom, newest != nil else { return }
             withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
@@ -109,8 +171,11 @@ struct MacConversationView: View {
 
     private var subtitle: String {
         switch source {
-        case .topic(_, _, let channelName): "#\(channelName)"
-        case .dm: "Direct message"
+        case .topic(_, _, let channelName):
+            return model.headerSubtitle(forChannel: channelName)
+        case .dm(let key):
+            let others = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != model.selfUserID }
+            return others.count > 1 ? "Group direct message" : "Direct message"
         }
     }
 
@@ -118,6 +183,107 @@ struct MacConversationView: View {
         switch source {
         case .topic(_, let name, _): "Message \(name.isEmpty ? "general chat" : name)"
         case .dm(let key): "Message \(model.title(forDM: key))"
+        }
+    }
+
+    private var forumChannel: ChannelSummary? {
+        guard case .topic(let channelID, _, _) = source,
+              let channel = model.channel(channelID), channel.rendersAsForum
+        else { return nil }
+        return channel
+    }
+
+    /// Read off the sidebar's own summaries, so the toolbar button greys out the moment
+    /// the conversation is caught up.
+    private var unreadCount: Int {
+        switch source {
+        case .dm(let key): model.dms.first { $0.dmKey == key }?.unreadCount ?? 0
+        case .topic(let channelID, let name, _):
+            model.recentTopics[channelID]?.first { $0.name == name }?.unreadCount
+                ?? (model.channel(channelID)?.unreadCount ?? 0)
+        }
+    }
+}
+
+/// The top of history, so scrolling back ends at a statement rather than a blank.
+private struct MacConversationStart: View {
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "sparkles").foregroundStyle(.tertiary)
+            Text("This is the beginning of \(title).")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
+private struct MacDropHint: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                Label("Drop to attach", systemImage: "paperclip")
+                    .font(.title3.weight(.medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: Capsule())
+            }
+            .padding(12)
+            .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Quick reactions
+
+/// The realm's habits, computed the same way the phone's action sheet computes them.
+enum MacQuickReactionsLoader {
+    @MainActor
+    static func load(model: AppModel, count: Int = 3) -> [QuickReaction] {
+        // The controller does the resolution; the message it is built for is irrelevant
+        // to which emoji are popular here.
+        let probe = MessageRecord(
+            id: 0, channelID: nil, topic: nil, dmKey: nil, senderID: 0, senderName: "",
+            senderAvatar: nil, renderedContent: "", timestamp: 0, isRead: true,
+            isMentioned: false, editedAt: nil, isWidget: false
+        )
+        let controller = MessageActionsController(message: probe, model: model)
+        controller.loadQuickReactions()
+        return Array(controller.quickReactions.prefix(count))
+    }
+}
+
+private struct MacQuickReactionsKey: EnvironmentKey {
+    static let defaultValue: [QuickReaction] = []
+}
+
+extension EnvironmentValues {
+    var macQuickReactions: [QuickReaction] {
+        get { self[MacQuickReactionsKey.self] }
+        set { self[MacQuickReactionsKey.self] = newValue }
+    }
+}
+
+// MARK: - Uploads from outside the composer
+
+extension AppModel {
+    /// Uploads files dropped anywhere on a conversation and hands the resulting markdown
+    /// to that conversation's composer, which appends it like any other delivery.
+    func uploadAndDeliver(files: [URL], to conversation: String) async {
+        for url in files {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let type = UTType(filenameExtension: url.pathExtension) ?? .data
+            if case .success(let markdown) = await upload(
+                data, filename: url.lastPathComponent, contentType: type.preferredMIME
+            ) {
+                ComposerInbox.shared.deliver(markdown + "\n", to: conversation)
+            }
         }
     }
 }

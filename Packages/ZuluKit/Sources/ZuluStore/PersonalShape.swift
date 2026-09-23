@@ -130,6 +130,12 @@ extension ZuluStore {
         }
     }
 
+    /// Every promotion, whichever group it is filed in, for surfaces that search the whole
+    /// sidebar at once rather than one section of it.
+    public func promotedTopics() throws -> [PromotedTopicRecord] {
+        try writer.read { db in try PromotedTopicRecord.fetchAll(db) }
+    }
+
     /// A promotion follows its topic when the server renames it. Without this the entry
     /// would quietly point at a name nobody uses any more.
     public func renamePromotedTopic(inChannel channelID: Int, from old: String, to new: String) throws {

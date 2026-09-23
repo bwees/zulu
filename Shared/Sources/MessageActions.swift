@@ -19,6 +19,7 @@ private struct MessageActionsModifier: ViewModifier {
     @State private var showingActions = false
 
     func body(content: Content) -> some View {
+        #if os(iOS)
         VStack(alignment: .leading, spacing: 0) {
             // The gesture is on the message itself, never on the chips below it: a chip
             // owns its own long press, for showing who reacted.
@@ -38,6 +39,14 @@ private struct MessageActionsModifier: ViewModifier {
         .sheet(isPresented: $showingActions) {
             MessageActionsSheet(message: message)
         }
+        #else
+        // A pointer has no long press worth waiting for. The Mac conversation hangs its
+        // own hover bar and context menu off the whole row instead.
+        VStack(alignment: .leading, spacing: 0) {
+            content
+            MessageReactionsRow(messageID: message.id, groups: reactions)
+        }
+        #endif
     }
 }
 

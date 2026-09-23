@@ -45,6 +45,7 @@ is worth notifying about.
 - [Zulip message content model](issues/05-zulip-message-model.md) — render the server's `rendered_content` HTML natively; never re-parse markdown. The topic field is `subject` on the wire.
 - [iPhone navigation shell](issues/06-iphone-navigation.md) — the Discord-style drawer shell wins over a native tab bar and a flat topic inbox. Three levels deep at most; DMs are a rail entry.
 - [Local store schema and sync model](issues/11-local-store-schema.md) — settled by building it: GRDB, six tables, DM conversations derived from a participant key rather than a table. Fetch-gap tracking and retention are still missing.
+- [macOS navigation shell](issues/07-macos-navigation.md) — settled by building it: one window, a rail-plus-list sidebar beside the conversation, forum topics nested under a disclosure, selection shared with iOS through the model's destination. The menu bar, ⌘K, an `NSTextView` composer, hover actions and running-app notifications came with it.
 - [Swift package layout and module boundaries](issues/17-package-layout.md) — settled by building it: `ZulipAPI`, `ZuluMarkup`, `ZuluStore`, `ZuluSync`, with GRDB stopping at the store.
 
 ## Not yet specified
@@ -55,7 +56,6 @@ is worth notifying about.
 - **Message actions.** Reactions picker, quote-reply, edit, delete, move-to-topic.
 - **Connection and error UX.** Reconnect, queue expiry, server unreachable, auth expiry — and the degraded-notifications state the push-suppression ticket will define.
 - **Onboarding and account switching flow.** First-run, realm URL entry, sign-out, token revocation.
-- **Mac keyboard and menu surface.** Command palette, menu bar, keyboard shortcuts.
 - **Notification Service Extension on macOS.** Reportedly unreliable; gates avatars and communication notifications there. Needs an on-device spike before the Mac notification design is settled.
 - **Testing strategy.** What gets unit tests, what gets snapshot tests, how the Go service is tested against a fake Zulip.
 - **User presence and status.** How presence is fetched and kept current, its polling cost on mobile, how much arrives in the register snapshot, and whether the client publishes its own presence. The rendering is decided; the mechanism is not.

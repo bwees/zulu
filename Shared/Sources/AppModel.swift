@@ -49,6 +49,9 @@ final class AppModel {
     /// Set when a freshly made group should open its editor straight away.
     var pendingGroupToEdit: String?
     var isWorking = false
+    /// Each message the live queue delivers, for a platform that wants to notify about
+    /// it. Unset, arrivals are simply written to the store like everything else.
+    var messageArrivalHandler: ((ZulipMessage) -> Void)?
 
     fileprivate var store: ZuluStore?
     fileprivate var client: ZulipClient?
@@ -85,6 +88,9 @@ final class AppModel {
 
             await sync.onStatusChange { [weak self] status in
                 Task { @MainActor in self?.status = status }
+            }
+            await sync.onMessageArrival { [weak self] message in
+                Task { @MainActor in self?.messageArrivalHandler?(message) }
             }
             await sync.start()
         } catch {
@@ -366,7 +372,7 @@ extension AppModel {
 
     /// Sending every id at once is what a long-unread topic actually needs, and what the
     /// server would rather receive than four hundred requests.
-    private static let markReadBatch = 1000
+    static let markReadBatch = 1000
 
     /// Reaching the bottom of a conversation clears the whole conversation, not only the
     /// messages that were drawn on the way there.
@@ -459,6 +465,48 @@ extension AppModel {
 
     func setChannels(_ ids: [Int], inGroup groupID: String) {
         try? store?.setChannels(ids, inGroup: groupID)
+    }
+
+    /// The group a channel is filed in, or nil when it sits in the unfiled pile.
+    func group(containingChannel id: Int) -> String? {
+        groups.first { channelIDs(inGroup: $0.id).contains(id) }?.id
+    }
+
+    /// Files one channel somewhere else without touching the rest of either group.
+    /// `nil` sends it back to the unfiled pile.
+    func moveChannel(_ id: Int, toGroup target: String?) {
+        if let current = group(containingChannel: id) {
+            guard current != target else { return }
+            setChannels(channelIDs(inGroup: current).filter { $0 != id }, inGroup: current)
+        }
+        if let target {
+            setChannels(channelIDs(inGroup: target) + [id], inGroup: target)
+        }
+    }
+}
+
+// MARK: - Conversations by people
+
+extension AppModel {
+    /// The key a direct message with these people would have, whether or not one exists
+    /// yet. Sending the first message is what brings it into the list.
+    func dmKey(with userIDs: [Int]) -> String? {
+        guard let selfID = account?.userID else { return nil }
+        return MessageRecord.dmKey(for: userIDs, selfUserID: selfID)
+    }
+
+    /// Everything unread in a channel, cleared at once. A sidebar row's "mark as read"
+    /// means the whole channel, not the topics that happen to be open.
+    func markChannelRead(_ id: Int) async {
+        guard let store else { return }
+        let ids = (try? store.unreadIDs(inChannel: id)) ?? []
+        for start in stride(from: 0, to: ids.count, by: Self.markReadBatch) {
+            await markRead(Array(ids[start..<min(start + Self.markReadBatch, ids.count)]))
+        }
+    }
+
+    var promotedTopics: [PromotedTopicRecord] {
+        (try? store?.promotedTopics()) ?? []
     }
 }
 

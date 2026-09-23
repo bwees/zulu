@@ -352,6 +352,16 @@ extension ZuluStore {
         }
     }
 
+    /// Every unread message in a channel across all of its topics, for clearing a whole
+    /// channel from the sidebar without opening each conversation in it.
+    public func unreadIDs(inChannel channelID: Int) throws -> [Int] {
+        try writer.read { db in
+            try Int.fetchAll(
+                db, sql: "SELECT messageID FROM unread WHERE channelID = ?", arguments: [channelID]
+            )
+        }
+    }
+
     public func unreadIDs(inDM key: String) throws -> [Int] {
         try writer.read { db in
             try Int.fetchAll(

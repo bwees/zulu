@@ -1,3 +1,4 @@
+import AppKit
 import GRDB
 import SwiftUI
 import ZuluStore
@@ -10,190 +11,305 @@ import ZuluStore
 /// which is why this is its own view and not the drawer with the gesture taken out.
 struct MacShellView: View {
     @Environment(AppModel.self) private var model
+    @Environment(MacUIState.self) private var ui
 
-    private enum Section: Equatable, Hashable {
-        case dms
-        case group(String)
-        case unfiled
-    }
-
-    @State private var section: Section = .unfiled
     @State private var channels: [ChannelSummary] = []
     @State private var promoted: [PromotedTopicSummary] = []
     @State private var promotedTask: Task<Void, Never>?
-    @State private var selection: MacSelection?
     @State private var expanded: Set<Int> = []
+    @State private var columns: NavigationSplitViewVisibility = .all
 
-    private static let railWidth: CGFloat = 64
+    @State private var renamingChannel: ChannelSummary?
+    @State private var renamingPromoted: PromotedTopicSummary?
+    @State private var aliasDraft = ""
+    @State private var newGroupName = ""
+    @State private var sectionFollowedDestination = false
 
     var body: some View {
-        NavigationSplitView {
-            HStack(spacing: 0) {
-                rail
-                Divider()
-                channelList
-            }
-            .navigationSplitViewColumnWidth(min: 300, ideal: 320, max: 460)
+        @Bindable var ui = ui
+        NavigationSplitView(columnVisibility: $columns) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 300, ideal: 330, max: 480)
         } detail: {
-            switch selection {
-            case .conversation(let source):
-                MacConversationView(source: source).id(source)
-            case .chatChannel(let id, let name):
-                // A chat channel's messages live in whatever single topic it happens to
-                // use, which is rarely the empty one. Resolving it here rather than in
-                // the row keeps the sidebar from having to know a channel's contents.
-                MacChannelView(channelID: id, channelName: name).id(id)
-            case nil:
-                EmptyStateView(text: "Pick a conversation.")
+            MacDetailView()
+        }
+        .task(id: ui.section) { await observe() }
+        // The remembered destination comes back before the groups do, so the section
+        // follows it once the groups are known — and only once, or switching sections
+        // by hand would keep snapping back.
+        .onChange(of: model.groups.count, initial: true) {
+            guard !sectionFollowedDestination, let destination = model.destination else { return }
+            sectionFollowedDestination = true
+            ui.section = section(for: destination)
+        }
+        .onChange(of: model.pendingGroupToEdit) { _, id in
+            guard let id else { return }
+            ui.section = .group(id)
+            ui.editingGroup = MacUIState.GroupBox(id: id)
+            model.pendingGroupToEdit = nil
+        }
+        .onChange(of: dockBadge, initial: true) { _, count in
+            NSApp.dockTile.badgeLabel = count > 0 ? String(count) : nil
+        }
+        .sheet(isPresented: $ui.showingQuickSwitcher) { MacQuickSwitcher() }
+        .sheet(isPresented: $ui.showingNewMessage) { MacNewMessageSheet() }
+        .sheet(isPresented: $ui.showingHidden) { MacHiddenChannelsSheet() }
+        .sheet(item: $ui.newTopicChannel) { box in MacNewTopicSheet(channel: box.channel) }
+        .sheet(item: $ui.editingGroup) { box in MacGroupEditor(groupID: box.id) }
+        .alert("New Group", isPresented: $ui.showingNewGroup) {
+            TextField("Name", text: $newGroupName)
+            Button("Cancel", role: .cancel) { newGroupName = "" }
+            Button("Create") {
+                let name = newGroupName.trimmingCharacters(in: .whitespaces)
+                newGroupName = ""
+                guard !name.isEmpty else { return }
+                model.createGroup(named: name)
+            }
+        } message: {
+            Text("Group channels however you like. Groups stay on your devices — Zulip never learns they exist.")
+        }
+        .alert("Rename for Me", isPresented: Binding(
+            get: { renamingChannel != nil },
+            set: { if !$0 { renamingChannel = nil } }
+        )) {
+            TextField("Name", text: $aliasDraft)
+            Button("Cancel", role: .cancel) {}
+            if let channel = renamingChannel, model.alias(forChannel: channel.id) != nil {
+                Button("Use Real Name", role: .destructive) {
+                    model.setAlias(nil, forChannel: channel.id)
+                }
+            }
+            Button("Save") {
+                if let channel = renamingChannel { model.setAlias(aliasDraft, forChannel: channel.id) }
+            }
+        } message: {
+            Text("Only you see this name. Mentions and links still use the real one.")
+        }
+        .alert("Rename for Me", isPresented: Binding(
+            get: { renamingPromoted != nil },
+            set: { if !$0 { renamingPromoted = nil } }
+        )) {
+            TextField("Name", text: $aliasDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Use Real Name", role: .destructive) {
+                if let p = renamingPromoted {
+                    model.setAlias(nil, forPromotedTopic: p.topic, inChannel: p.channelID)
+                }
+            }
+            Button("Save") {
+                if let p = renamingPromoted {
+                    model.setAlias(aliasDraft, forPromotedTopic: p.topic, inChannel: p.channelID)
+                }
+            }
+        } message: {
+            Text("Only you see this name.")
+        }
+        .confirmationDialog(
+            "Sign out of \(model.account?.email ?? "this account")?",
+            isPresented: $ui.confirmingSignOut,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
+        } message: {
+            Text("Your channel groups, renames and hidden channels on this Mac are removed with it.")
+        }
+    }
+
+    /// Mentions and direct messages only: a number for every unread message in every
+    /// channel turns the dock into a nag.
+    private var dockBadge: Int {
+        model.dms.reduce(0) { $0 + $1.unreadCount }
+            + model.allChannels.reduce(0) { $0 + $1.mentionCount }
+    }
+
+    // MARK: sidebar
+
+    private var sidebar: some View {
+        HStack(spacing: 0) {
+            MacRail()
+            Divider()
+            VStack(spacing: 0) {
+                list
+                Divider()
+                MacSidebarFooter()
             }
         }
-        .task(id: section) { await observe() }
     }
-
-    // MARK: rail
-
-    private var rail: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                railButton(active: section == .dms, unread: model.dms.contains { $0.unreadCount > 0 }) {
-                    section = .dms
-                } label: {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                }
-
-                Divider().frame(width: 26)
-
-                ForEach(model.groups) { group in
-                    railButton(
-                        active: section == .group(group.id), unread: group.unreadCount > 0
-                    ) {
-                        section = .group(group.id)
-                    } label: {
-                        Text(initials(of: group.name)).font(.caption.weight(.bold))
-                    }
-                    .help(group.name)
-                }
-
-                if !model.groups.isEmpty { Divider().frame(width: 26) }
-
-                railButton(
-                    active: section == .unfiled,
-                    unread: model.unfiledChannels.contains { $0.unreadCount > 0 }
-                ) {
-                    section = .unfiled
-                } label: {
-                    Image(systemName: "number")
-                }
-                .help("Channels")
-            }
-            .padding(.vertical, 10)
-        }
-        .frame(width: Self.railWidth)
-        .scrollIndicators(.never)
-        .background(.quaternary.opacity(0.4))
-    }
-
-    private func railButton<Face: View>(
-        active: Bool,
-        unread: Bool,
-        action: @escaping () -> Void,
-        @ViewBuilder label: () -> Face
-    ) -> some View {
-        Button(action: action) {
-            label()
-                .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                .frame(width: 40, height: 40)
-                .background(
-                    active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary),
-                    in: RoundedRectangle(cornerRadius: active ? 12 : 20)
-                )
-                .overlay(alignment: .leading) {
-                    // The unread pill sits outside the tile, the way Discord marks a
-                    // server you have not read.
-                    if unread || active {
-                        Capsule()
-                            .fill(.primary)
-                            .frame(width: 3, height: active ? 22 : 8)
-                            .offset(x: -10)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .animation(.snappy(duration: 0.18), value: active)
-    }
-
-    private func initials(of name: String) -> String {
-        let words = name.split(separator: " ").prefix(2)
-        return words.map { $0.prefix(1).uppercased() }.joined()
-    }
-
-    // MARK: channels
 
     /// Rows carry a `tag`, not a `NavigationLink`. In a `List(selection:)` driving a
     /// split view's detail column, a link has nothing to push onto and the row simply
     /// does not respond.
-    private var channelList: some View {
-        List(selection: $selection) {
-            if section == .dms {
-                ForEach(model.dms) { dm in
-                    MacSidebarRow(
-                        title: model.title(forDM: dm.dmKey),
-                        subtitle: model.preview(forDM: dm),
-                        symbol: nil,
-                        restricted: false,
-                        unread: dm.unreadCount
-                    )
-                    .tag(MacSelection.conversation(.dm(key: dm.dmKey)))
-                }
-            } else {
-                ForEach(entries) { entry in
-                    switch entry {
-                    case .promoted(let topic):
-                        MacSidebarRow(
-                            title: topic.displayName,
-                            subtitle: nil,
-                            symbol: "number",
-                            restricted: topic.isRestricted,
-                            unread: topic.unreadCount
-                        )
-                        .tag(
-                            MacSelection.conversation(
-                                .topic(
-                                    channelID: topic.channelID, name: topic.topic,
-                                    channelName: topic.channelName
-                                )
-                            )
-                        )
-                    case .channel(let channel):
-                        channelRow(channel)
-                    }
-                }
+    private var list: some View {
+        List(selection: destinationBinding) {
+            // The column's navigation title does not render on macOS 26, so the section
+            // says what it is at the top of the list, the way Mail's sidebar does.
+            Section(listTitle) {
+                sectionRows
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle(listTitle)
+    }
+
+    @ViewBuilder
+    private var sectionRows: some View {
+        if ui.section == .dms {
+            if model.dms.isEmpty {
+                Text("No direct messages yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .selectionDisabled()
+            }
+            ForEach(model.dms) { dm in
+                MacDMRow(dm: dm)
+                    .tag(AppModel.Destination.dm(dm.dmKey))
+                    .contextMenu {
+                        Button("Mark as Read") {
+                            Task { await model.markConversationRead(.dm(key: dm.dmKey)) }
+                        }
+                        .disabled(dm.unreadCount == 0)
+                    }
+            }
+        } else {
+            ForEach(entries) { entry in
+                switch entry {
+                case .promoted(let topic):
+                    promotedRow(topic)
+                case .channel(let channel):
+                    channelRow(channel)
+                }
+            }
+            .onMove { source, destination in
+                var ordered = entries
+                ordered.move(fromOffsets: source, toOffset: destination)
+                model.reorderSidebar(ordered.map(\.slot))
+            }
+            if entries.isEmpty {
+                Text(emptyListMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .selectionDisabled()
+            }
+        }
+    }
+
+    /// The list writes straight into the model, so the rail, the menu bar and the quick
+    /// switcher all move the same selection. Deselecting is ignored: an empty detail
+    /// column is never what a click on blank sidebar meant.
+    private var destinationBinding: Binding<AppModel.Destination?> {
+        Binding(
+            get: { model.destination },
+            set: { if let destination = $0 { model.destination = destination } }
+        )
     }
 
     @ViewBuilder
     private func channelRow(_ channel: ChannelSummary) -> some View {
         if channel.rendersAsForum {
-            // A forum gets the disclosure triangle and no icon beside it: the triangle
-            // already says "this contains things", and a symbol next to it was just
-            // clutter at sidebar size.
             DisclosureGroup(isExpanded: binding(forChannel: channel.id)) {
-                MacTopicList(channel: channel)
+                MacTopicRows(channel: channel, groupID: currentGroupID)
             } label: {
                 MacSidebarRow(
-                    title: channel.name, subtitle: nil, symbol: nil,
-                    restricted: channel.isRestricted, unread: channel.unreadCount
+                    title: channel.name,
+                    symbol: "bubble.left.and.text.bubble.right",
+                    restricted: channel.isRestricted,
+                    unread: channel.unreadCount,
+                    mentions: channel.mentionCount
                 )
             }
+            .tag(AppModel.Destination.channel(channel.id))
+            .contextMenu { channelMenu(channel) }
         } else {
             MacSidebarRow(
-                title: channel.name, subtitle: nil, symbol: "number",
-                restricted: channel.isRestricted, unread: channel.unreadCount
+                title: channel.name,
+                symbol: "number",
+                restricted: channel.isRestricted,
+                unread: channel.unreadCount,
+                mentions: channel.mentionCount
             )
-            .tag(MacSelection.chatChannel(id: channel.id, name: channel.name))
+            .tag(AppModel.Destination.channel(channel.id))
+            .contextMenu { channelMenu(channel) }
+        }
+    }
+
+    @ViewBuilder
+    private func channelMenu(_ channel: ChannelSummary) -> some View {
+        Button("Mark as Read") { Task { await model.markChannelRead(channel.id) } }
+            .disabled(channel.unreadCount == 0)
+        if channel.rendersAsForum {
+            Button("New Topic…") { ui.newTopicChannel = ChannelSummaryBox(channel: channel) }
+        }
+        Divider()
+        Button("Rename for Me…") {
+            aliasDraft = model.alias(forChannel: channel.id) ?? ""
+            renamingChannel = channel
+        }
+        Button("Hide Channel") { model.setHidden(true, forChannel: channel.id) }
+        Divider()
+        Menu("Move to Group") {
+            Button("Unfiled") { model.moveChannel(channel.id, toGroup: nil) }
+                .disabled(currentGroupID == nil)
+            ForEach(model.groups) { group in
+                Button(group.name) { model.moveChannel(channel.id, toGroup: group.id) }
+                    .disabled(currentGroupID == group.id)
+            }
+        }
+        Picker("Show As", selection: Binding(
+            get: { model.modeOverride(forChannel: channel.id) },
+            set: { model.setMode($0, forChannel: channel.id) }
+        )) {
+            Text("Automatic").tag(ChannelMode?.none)
+            ForEach(ChannelMode.allCases, id: \.self) { mode in
+                Text(mode.label).tag(ChannelMode?.some(mode))
+            }
+        }
+    }
+
+    /// A promoted topic gets exactly the row a channel gets. It is a channel as far as
+    /// the sidebar is concerned; its origin rides underneath because the name alone
+    /// rarely says where it lives.
+    private func promotedRow(_ promoted: PromotedTopicSummary) -> some View {
+        MacSidebarRow(
+            title: promoted.displayName,
+            subtitle: "#\(promoted.channelName)",
+            symbol: "number",
+            restricted: promoted.isRestricted,
+            unread: promoted.unreadCount,
+            mentions: promoted.mentionCount
+        )
+        .tag(AppModel.Destination.topic(
+            channelID: promoted.channelID, name: promoted.topic, channelName: promoted.channelName
+        ))
+        .contextMenu {
+            Button("Mark as Read") {
+                Task {
+                    await model.markConversationRead(.topic(
+                        channelID: promoted.channelID, name: promoted.topic,
+                        channelName: promoted.channelName
+                    ))
+                }
+            }
+            .disabled(promoted.unreadCount == 0)
+            Divider()
+            Button("Rename for Me…") {
+                aliasDraft = promoted.displayName
+                renamingPromoted = promoted
+            }
+            Button("Remove from Sidebar") {
+                model.demote(topic: promoted.topic, inChannel: promoted.channelID)
+            }
+            Divider()
+            Menu("Move to Group") {
+                Button("Unfiled") {
+                    model.setGroup(nil, forPromotedTopic: promoted.topic, inChannel: promoted.channelID)
+                }
+                .disabled(currentGroupID == nil)
+                ForEach(model.groups) { group in
+                    Button(group.name) {
+                        model.setGroup(group.id, forPromotedTopic: promoted.topic, inChannel: promoted.channelID)
+                    }
+                    .disabled(currentGroupID == group.id)
+                }
+            }
         }
     }
 
@@ -202,11 +318,23 @@ struct MacShellView: View {
     }
 
     private var listTitle: String {
-        switch section {
+        switch ui.section {
         case .dms: "Direct Messages"
-        case .unfiled: "Channels"
+        case .unfiled: model.groups.isEmpty ? "Channels" : "Unfiled"
         case .group(let id): model.groups.first { $0.id == id }?.name ?? "Channels"
         }
+    }
+
+    private var emptyListMessage: String {
+        switch ui.section {
+        case .group: "No channels in this group yet. Right-click its icon on the rail to edit it."
+        case .unfiled: model.allChannels.isEmpty ? "Syncing your channels…" : "Every channel is filed into a group."
+        case .dms: ""
+        }
+    }
+
+    private var currentGroupID: String? {
+        if case .group(let id) = ui.section { id } else { nil }
     }
 
     /// A forum stays open once opened, because on a Mac the list is on screen the whole
@@ -221,8 +349,8 @@ struct MacShellView: View {
     }
 
     private func observe() async {
-        guard section != .dms, let writer = model.databaseWriter else { return }
-        let groupID: String? = if case .group(let id) = section { id } else { nil }
+        guard ui.section != .dms, let writer = model.databaseWriter else { return }
+        let groupID = currentGroupID
 
         promotedTask?.cancel()
         if let observation = model.promotedTopicObservation(inGroup: groupID) {
@@ -239,33 +367,59 @@ struct MacShellView: View {
             // Observation ends when the section changes; nothing to recover.
         }
     }
+
+    /// Where a destination lives in the rail, so opening something from outside the
+    /// sidebar — the quick switcher, a notification — shows it selected rather than
+    /// leaving the sidebar on an unrelated group.
+    private func section(for destination: AppModel.Destination) -> SidebarSection {
+        MacShellView.section(for: destination, model: model)
+    }
+
+    static func section(for destination: AppModel.Destination, model: AppModel) -> SidebarSection {
+        switch destination {
+        case .dm:
+            return .dms
+        case .channel(let id):
+            return model.group(containingChannel: id).map(SidebarSection.group) ?? .unfiled
+        case .topic(let channelID, let name, _):
+            if let promotion = model.promotedTopics.first(where: {
+                $0.channelID == channelID && $0.topic == name
+            }) {
+                return promotion.groupID.map(SidebarSection.group) ?? .unfiled
+            }
+            return model.group(containingChannel: channelID).map(SidebarSection.group) ?? .unfiled
+        }
+    }
 }
+
+// MARK: - Rows
 
 /// One line of the Mac sidebar. A lock rides after the name rather than as a badge on an
 /// icon, which at this size collided with the icon it was meant to annotate.
-private struct MacSidebarRow: View {
+struct MacSidebarRow: View {
     let title: String
     var subtitle: String?
     var symbol: String?
     var restricted = false
-    var unread: Int
+    var unread = 0
+    var mentions = 0
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.caption)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(width: 13)
+                    .frame(width: 16)
             }
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.callout.weight(unread > 0 ? .semibold : .regular))
+                        .font(.body.weight(unread > 0 ? .semibold : .regular))
                         .lineLimit(1)
                     if restricted {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 8))
+                            .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -277,19 +431,61 @@ private struct MacSidebarRow: View {
                 }
             }
             Spacer(minLength: 4)
-            Badge(count: unread)
+            // A mention is addressed to you and outranks a plain unread; the count
+            // shown is whichever one you would act on first.
+            if mentions > 0 {
+                Badge(count: mentions, mention: true)
+            } else if unread > 0 {
+                Text(unread > 99 ? "99+" : "\(unread)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 1)
     }
 }
 
+struct MacDMRow: View {
+    let dm: DMSummary
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 9) {
+            SenderAvatar(
+                name: model.title(forDM: dm.dmKey),
+                userID: model.soleParticipant(inDM: dm.dmKey),
+                size: 30
+            )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.title(forDM: dm.dmKey))
+                    .font(.body.weight(dm.unreadCount > 0 ? .semibold : .regular))
+                    .lineLimit(1)
+                if let preview = model.preview(forDM: dm) {
+                    Text(preview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            Badge(count: dm.unreadCount, mention: true)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 /// The topics under one forum channel, nested in the sidebar rather than pushed onto a
-/// second screen.
-private struct MacTopicList: View {
+/// second screen. Only the most recent few: the channel's own page lists them all.
+private struct MacTopicRows: View {
     let channel: ChannelSummary
+    let groupID: String?
+
     @Environment(AppModel.self) private var model
     @State private var topics: [TopicSummary] = []
     @State private var loaded = false
+
+    private static let shown = 8
 
     var body: some View {
         Group {
@@ -297,31 +493,43 @@ private struct MacTopicList: View {
                 // A placeholder, not nothing: the observation hangs off this view, and a
                 // `ForEach` over an empty array produces no view to hang it on — so with
                 // nothing here an expanded forum never loads its own topics.
-                MacSidebarRow(
-                    title: loaded ? "No topics yet" : "Loading…", symbol: nil, unread: 0
-                )
-                .foregroundStyle(.secondary)
-                .selectionDisabled()
+                Text(loaded ? "No topics yet" : "Loading…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .selectionDisabled()
             } else {
-                ForEach(topics) { topic in
+                ForEach(topics.prefix(Self.shown)) { topic in
                     MacSidebarRow(
                         title: topic.name.isEmpty ? "general chat" : topic.name,
-                        symbol: nil,
                         unread: topic.unreadCount
                     )
-                    .tag(
-                        MacSelection.conversation(
-                            .topic(
-                                channelID: channel.id, name: topic.name,
-                                channelName: channel.name
-                            )
-                        )
-                    )
+                    .tag(AppModel.Destination.topic(
+                        channelID: channel.id, name: topic.name, channelName: channel.name
+                    ))
                     .contextMenu {
-                        Button("Promote to sidebar") {
-                            model.promote(topic: topic.name, inChannel: channel.id)
+                        Button("Mark as Read") {
+                            Task {
+                                await model.markConversationRead(.topic(
+                                    channelID: channel.id, name: topic.name, channelName: channel.name
+                                ))
+                            }
+                        }
+                        .disabled(topic.unreadCount == 0)
+                        Button("Promote to Sidebar") {
+                            model.promote(topic: topic.name, inChannel: channel.id, toGroup: groupID)
                         }
                     }
+                }
+                if topics.count > Self.shown {
+                    Button {
+                        model.destination = .channel(channel.id)
+                    } label: {
+                        Text("All \(topics.count) topics…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .selectionDisabled()
                 }
             }
         }
@@ -341,52 +549,215 @@ private struct MacTopicList: View {
     }
 }
 
-/// What the sidebar can have selected.
-///
-/// A chat channel is not a conversation yet — which topic it means depends on what is in
-/// it — so it stays a channel until something resolves it.
-enum MacSelection: Hashable {
-    case conversation(ConversationSource)
-    case chatChannel(id: Int, name: String)
-}
+// MARK: - Rail
 
-/// A channel that reads as chat rather than a forum: whatever single topic carries its
-/// traffic, opened directly.
-private struct MacChannelView: View {
-    let channelID: Int
-    let channelName: String
-
+/// Direct messages, then the groups, then whatever is unfiled, then a plus — the same
+/// order the phone's rail has, drawn narrower.
+struct MacRail: View {
     @Environment(AppModel.self) private var model
-    @State private var topics: [TopicSummary] = []
-    @State private var loaded = false
+    @Environment(MacUIState.self) private var ui
+
+    static let width: CGFloat = 64
 
     var body: some View {
-        Group {
-            if let newest = topics.max(by: { $0.maxMessageID < $1.maxMessageID }) {
-                MacConversationView(
-                    source: .topic(
-                        channelID: channelID, name: newest.name, channelName: channelName
-                    )
-                )
-                .id(newest.name)
-            } else if loaded {
-                EmptyStateView(text: "Nothing in #\(channelName) yet.")
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        ScrollView {
+            VStack(spacing: 10) {
+                railButton(
+                    active: ui.section == .dms,
+                    unread: model.dms.contains { $0.unreadCount > 0 },
+                    // Every direct message is addressed to you, so each unread one counts.
+                    mentions: model.dms.reduce(0) { $0 + $1.unreadCount }
+                ) {
+                    ui.section = .dms
+                } label: {
+                    MacRailIcon(systemImage: "bubble.left.and.bubble.right.fill", active: ui.section == .dms)
+                }
+                .help("Direct Messages  ⌘1")
+
+                Divider().frame(width: 26)
+
+                ForEach(Array(model.groups.enumerated()), id: \.element.id) { index, group in
+                    railButton(
+                        active: ui.section == .group(group.id),
+                        unread: group.unreadCount > 0,
+                        mentions: group.mentionCount
+                    ) {
+                        ui.section = .group(group.id)
+                    } label: {
+                        MacGroupAvatar(name: group.name, icon: group.icon, active: ui.section == .group(group.id))
+                    }
+                    .help(index < 7 ? "\(group.name)  ⌘\(index + 3)" : group.name)
+                    .contextMenu {
+                        Button("Edit Group…") { ui.editingGroup = MacUIState.GroupBox(id: group.id) }
+                        Button("Delete Group", role: .destructive) {
+                            if ui.section == .group(group.id) { ui.section = .unfiled }
+                            model.deleteGroup(id: group.id)
+                        }
+                    }
+                }
+
+                if !model.groups.isEmpty { Divider().frame(width: 26) }
+
+                railButton(
+                    active: ui.section == .unfiled,
+                    unread: model.unfiledChannels.contains { $0.unreadCount > 0 },
+                    mentions: model.unfiledChannels.reduce(0) { $0 + $1.mentionCount }
+                ) {
+                    ui.section = .unfiled
+                } label: {
+                    MacRailIcon(systemImage: "number", active: ui.section == .unfiled)
+                }
+                .help((model.groups.isEmpty ? "Channels" : "Unfiled Channels") + "  ⌘2")
+
+                railButton(active: false, unread: false, mentions: 0) {
+                    ui.showingNewGroup = true
+                } label: {
+                    MacRailIcon(systemImage: "plus")
+                }
+                .help("New Group  ⇧⌘G")
             }
+            .padding(.vertical, 10)
         }
-        .task(id: channelID) { await observe() }
+        .frame(width: Self.width)
+        .scrollIndicators(.never)
+        .background(.quaternary.opacity(0.35))
     }
 
-    private func observe() async {
-        guard let writer = model.databaseWriter,
-              let observation = model.topics(inChannel: channelID)
-        else { return }
-        do {
-            for try await rows in observation.values(in: writer) {
-                topics = rows
-                loaded = true
+    /// Unread is a pill on the rail's edge; a count only appears when something actually
+    /// needs an answer. A number for every unread message turns the rail into noise.
+    private func railButton<Face: View>(
+        active: Bool,
+        unread: Bool,
+        mentions: Int,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Face
+    ) -> some View {
+        Button(action: action) {
+            label()
+                .frame(width: 40, height: 40)
+                .overlay(alignment: .bottomTrailing) {
+                    if mentions > 0 {
+                        Text(mentions > 99 ? "99+" : "\(mentions)")
+                            .font(.system(size: 9, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.red, in: Capsule())
+                            .fixedSize()
+                            .offset(x: 4, y: 3)
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(.primary)
+                        .frame(width: 3, height: active ? 22 : (unread ? 8 : 0))
+                        .offset(x: -12)
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .animation(.snappy(duration: 0.18), value: active)
+        .animation(.snappy(duration: 0.18), value: unread)
+    }
+}
+
+struct MacRailIcon: View {
+    let systemImage: String
+    var active = false
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            .frame(width: 40, height: 40)
+            .background(
+                active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary),
+                in: RoundedRectangle(cornerRadius: active ? 12 : 20)
+            )
+    }
+}
+
+/// The rail bubble for a group: its icon, or its initials when it has none.
+struct MacGroupAvatar: View {
+    let name: String
+    let icon: Data?
+    var size: CGFloat = 40
+    var active = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: active ? size * 0.3 : size * 0.5)
+        Group {
+            if let icon, let image = Platform.image(from: icon) {
+                image.resizable().scaledToFill()
+            } else {
+                Text(initials)
+                    .font(.system(size: size * 0.32, weight: .bold))
+                    .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary))
             }
-        } catch {}
+        }
+        .frame(width: size, height: size)
+        .clipShape(shape)
+        .overlay {
+            if active && icon != nil { shape.stroke(Color.accentColor, lineWidth: 2) }
+        }
+    }
+
+    private var initials: String {
+        let words = name.split(separator: " ").prefix(2)
+        let letters = words.compactMap(\.first).map(String.init)
+        return letters.isEmpty ? "?" : letters.joined().uppercased()
+    }
+}
+
+// MARK: - Footer
+
+/// Who is signed in and whether the queue is live, at the bottom of the sidebar where
+/// every Mac chat client keeps it.
+struct MacSidebarFooter: View {
+    @Environment(AppModel.self) private var model
+    @Environment(MacUIState.self) private var ui
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SenderAvatar(name: selfName, userID: model.selfUserID, size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(selfName).font(.callout.weight(.medium)).lineLimit(1)
+                HStack(spacing: 4) {
+                    SyncDot(status: model.status)
+                    Text(statusLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            Menu {
+                Button("Hidden Channels…") { ui.showingHidden = true }
+                SettingsLink { Text("Settings…") }
+                Divider()
+                Button("Sign Out…") { ui.confirmingSignOut = true }
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Account and settings")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var selfName: String {
+        model.selfUserID.flatMap { model.users[$0]?.fullName } ?? model.account?.email ?? "You"
+    }
+
+    private var statusLabel: String {
+        switch model.status {
+        case .live: model.account?.realmURL.host() ?? "Connected"
+        case .connecting: "Connecting…"
+        case .failed(let message): message
+        case .idle: "Not connected"
+        }
     }
 }

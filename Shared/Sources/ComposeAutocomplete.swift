@@ -156,6 +156,58 @@ final class ComposeAutocompleteController {
         self.active = nil
         return result.text
     }
+
+    // MARK: cursor-aware, for a composer that knows where the insertion point is
+
+    /// Which row the keyboard has landed on. Reset to the best match whenever the
+    /// suggestions change, so arrowing down always starts from the top.
+    private(set) var selectedIndex = 0
+
+    var selectedSuggestion: AutocompleteSuggestion? {
+        suggestions.indices.contains(selectedIndex) ? suggestions[selectedIndex] : nil
+    }
+
+    /// The Mac composer reports the real cursor, so a completion can be picked
+    /// mid-sentence rather than assumed to be at the end.
+    func update(draft: String, cursorOffsetUTF16: Int) {
+        let offset = max(0, min(cursorOffsetUTF16, draft.utf16.count))
+        let cursor = String.Index(utf16Offset: offset, in: draft)
+        guard let engine, let query = engine.activeQuery(in: draft, cursor: cursor) else {
+            suggestions = []
+            active = nil
+            selectedIndex = 0
+            return
+        }
+        let unchanged = query == active
+        active = query
+        suggestions = engine.suggestions(for: query, in: context, limit: Self.visibleLimit)
+        if !unchanged || selectedIndex >= suggestions.count { selectedIndex = 0 }
+    }
+
+    func moveSelection(by delta: Int) {
+        guard !suggestions.isEmpty else { return }
+        selectedIndex = (selectedIndex + delta + suggestions.count) % suggestions.count
+    }
+
+    /// Replaces the query with the completion and says where the cursor now belongs,
+    /// as a UTF-16 offset because that is what an `NSTextView` speaks.
+    func complete(
+        _ suggestion: AutocompleteSuggestion, in draft: String
+    ) -> (text: String, cursorOffsetUTF16: Int)? {
+        guard let engine, let active else { return nil }
+        let result = engine.apply(suggestion, to: draft, replacing: active)
+        suggestions = []
+        self.active = nil
+        selectedIndex = 0
+        let offset = result.text.utf16.distance(from: result.text.startIndex, to: result.cursor)
+        return (result.text, offset)
+    }
+
+    func dismiss() {
+        suggestions = []
+        active = nil
+        selectedIndex = 0
+    }
 }
 
 /// The box itself, sitting directly above the compose bar.

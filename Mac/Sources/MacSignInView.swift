@@ -13,6 +13,9 @@ struct MacSignInView: View {
     @State private var settings: ServerSettings?
     @State private var checking = false
     @State private var lookupError: String?
+    @FocusState private var focus: Field?
+
+    private enum Field { case address, username, password }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -32,6 +35,12 @@ struct MacSignInView: View {
         .padding(32)
         .frame(width: 400)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The window opens ready to type into; a sign-in screen that needs a click
+        // first is a sign-in screen that is not sure what it is for.
+        .task { focus = .address }
+        .onChange(of: settings) { _, settings in
+            focus = settings?.passwordAuthEnabled == true ? .username : .address
+        }
     }
 
     private var addressEntry: some View {
@@ -40,6 +49,7 @@ struct MacSignInView: View {
             TextField("chat.example.com", text: $address)
                 .textContentType(.URL)
                 .autocorrectionDisabled()
+                .focused($focus, equals: .address)
                 .onSubmit { Task { await lookUp() } }
 
             if let lookupError {
@@ -82,9 +92,12 @@ struct MacSignInView: View {
                     )
                     .textContentType(settings.usernameIsEmail ? .emailAddress : .username)
                     .autocorrectionDisabled()
+                    .focused($focus, equals: .username)
+                    .onSubmit { focus = .password }
 
                     SecureField("Password", text: $password)
                         .textContentType(.password)
+                        .focused($focus, equals: .password)
                         .onSubmit { signIn(realmURL) }
 
                     if let error = model.signInError {

@@ -8,7 +8,9 @@ doesn't renders as plain chat, and the app works out which is which. Channels gr
 folders you make, topics can be promoted to sit beside channels, and anything can be
 renamed or hidden for yourself alone — none of which the Zulip server ever learns about.
 
-Minimum iOS 27, built on Liquid Glass.
+Minimum iOS 27, built on Liquid Glass. The Mac app is a real Mac app — sidebar and split view,
+menu bar and shortcuts, ⌘K to jump anywhere, a composer that sends on Return, notifications
+for mentions and direct messages while it is running.
 
 ## Status
 
@@ -23,7 +25,9 @@ locked and what is still open.
 
 | Path | What |
 | --- | --- |
-| `App` | The iOS app |
+| `App` | The iOS app, and the Xcode project that builds both apps |
+| `Mac` | The macOS app |
+| `Shared` | SwiftUI shared by both apps: the model, messages, composer pieces |
 | `Packages/ZuluKit` | `ZulipAPI`, `ZuluStore` (GRDB), `ZuluSync`, `ZuluMarkup`, `ZuluEmoji`, `ZuluCompose`, `ZuluPolls` |
 | `service` | The Go notification service |
 | `prototypes/` | Throwaway prototypes that answer one design question each |
@@ -35,7 +39,7 @@ locked and what is still open.
 cd App && xcodegen generate && open Zulu.xcodeproj
 ```
 
-Then sign in with your Zulip organization's address. Password and SSO both work; SSO opens
+Pick the `Zulu` scheme for iOS or `ZuluMac` for the Mac. Then sign in with your Zulip organization's address. Password and SSO both work; SSO opens
 a browser and comes back through the `zulip://` callback the server hardcodes.
 
 Releases to TestFlight happen on every push to `main` — see
