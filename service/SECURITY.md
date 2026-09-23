@@ -5,15 +5,15 @@ does not control. This document says what that means, without softening it.
 
 ## What is stored
 
-| Data | Where | Protection |
-| --- | --- | --- |
-| Zulip API key | `users.api_key_box` | AES-256-GCM, key from the environment |
-| Realm URL, email, Zulip user id | `users` | plaintext |
-| APNs device token | `devices.token` | plaintext |
-| Device secret (the app's bearer token) | `devices.secret_hash` | SHA-256 of a 256-bit random value |
-| Mirrored notification settings | `queue_state.state` | plaintext JSON |
-| Zulip event queue id and cursor | `queue_state` | plaintext |
-| Delivery log: which message id went to which device | `deliveries` | plaintext |
+| Data                                                | Where                 | Protection                            |
+| --------------------------------------------------- | --------------------- | ------------------------------------- |
+| Zulip API key                                       | `users.api_key_box`   | AES-256-GCM, key from the environment |
+| Realm URL, email, Zulip user id                     | `users`               | plaintext                             |
+| APNs device token                                   | `devices.token`       | plaintext                             |
+| Device secret (the app's bearer token)              | `devices.secret_hash` | SHA-256 of a 256-bit random value     |
+| Mirrored notification settings                      | `queue_state.state`   | plaintext JSON                        |
+| Zulip event queue id and cursor                     | `queue_state`         | plaintext                             |
+| Delivery log: which message id went to which device | `deliveries`          | plaintext                             |
 
 Message content is never stored. It goes from the Zulip event straight into an
 APNs payload and is then dropped.
@@ -84,7 +84,7 @@ The app should say this before sending a key, not afterwards:
    read and send messages as that account.
 2. Notification text — sender, channel, topic, and message body — is sent to
    Apple in plaintext, as APNs requires.
-3. While the service is running, Zulip stops sending its own push *and email*
+3. While the service is running, Zulip stops sending its own push _and email_
    notifications for the account.
 4. Removing the device stops notifications and deletes the stored key, but to
    revoke the key itself the user must regenerate it in Zulip, which signs every
