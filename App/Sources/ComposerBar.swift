@@ -16,6 +16,7 @@ struct ComposerBar: View {
     @Environment(AppModel.self) private var model
 
     @State private var draft = ""
+    @State private var replyingTo: ReplyDraft?
     @State private var sending = false
     @State private var uploading = false
     @State private var sendError: String?
@@ -45,6 +46,9 @@ struct ComposerBar: View {
                     Text("Uploading…").font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let replyingTo {
+                replyBanner(replyingTo)
             }
 
             HStack(alignment: .bottom, spacing: 8) {
@@ -112,6 +116,43 @@ struct ComposerBar: View {
         }
     }
 
+    /// Who is being answered, and enough of what they said to be sure it is the right
+    /// message — the same information a sent reply shows, before it is sent.
+    private func replyBanner(_ reply: ReplyDraft) -> some View {
+        HStack(spacing: 8) {
+            Capsule().fill(Color.accentColor).frame(width: 3)
+            SenderAvatar(name: reply.author, userID: reply.authorID, size: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Label("Replying to \(reply.author)", systemImage: "arrowshape.turn.up.left.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .labelStyle(.titleAndIcon)
+                Text(reply.preview)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel reply")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .padding(.vertical, 6)
+        .frame(height: 44)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
     private var field: some View {
         HStack(alignment: .bottom, spacing: 6) {
             TextField(placeholder, text: $draft, axis: .vertical)
@@ -140,7 +181,12 @@ struct ComposerBar: View {
     /// A quote-and-reply is appended rather than replacing what is there, so replying
     /// after starting to type does not throw the typing away.
     private func takeDelivery() {
-        guard let text = ComposerInbox.shared.take(for: ConversationKey.of(source)) else { return }
+        let key = ConversationKey.of(source)
+        if let reply = ComposerInbox.shared.takeReply(for: key) {
+            withAnimation(.snappy(duration: 0.24)) { replyingTo = reply }
+            focused = true
+        }
+        guard let text = ComposerInbox.shared.take(for: key) else { return }
         if !draft.isEmpty, !draft.hasSuffix("\n") { draft += "\n" }
         draft += text
         focused = true
@@ -155,13 +201,24 @@ struct ComposerBar: View {
     }
 
     private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return }
         sending = true
         sendError = nil
-        let previous = draft
+        let previousDraft = draft
+        let previousReply = replyingTo
         draft = ""
+        withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
         defer { sending = false }
+
+        // The quote markdown is assembled here rather than when the reply was started,
+        // so the field held the person's own words the whole time they were typing.
+        let text: String
+        if let previousReply, let quote = await model.quotedPrefix(for: previousReply, in: source) {
+            text = quote + typed
+        } else {
+            text = typed
+        }
 
         let failure: String?
         switch source {
@@ -172,7 +229,8 @@ struct ComposerBar: View {
         }
         if let failure {
             sendError = failure
-            draft = previous
+            draft = previousDraft
+            replyingTo = previousReply
         }
     }
 

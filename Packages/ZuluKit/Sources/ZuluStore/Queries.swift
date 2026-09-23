@@ -14,6 +14,8 @@ public struct ChannelSummary: Decodable, FetchableRecord, Sendable, Identifiable
     public var isForum: Bool
     public var unreadCount: Int
     public var mentionCount: Int
+    /// Where the viewer dragged it. Null until they drag anything.
+    public var position: Int?
 
     /// A channel whose recent traffic all sits in one topic is a chat room in practice,
     /// whatever the server thinks. This is the auto-detection the map fixed.
@@ -57,7 +59,8 @@ extension ZuluStore {
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
+                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
+                       c.position
                   FROM channel c
                  WHERE \(ChannelVisibility.clause)
                  ORDER BY c.position IS NULL, c.position, c.pinned DESC, name COLLATE NOCASE

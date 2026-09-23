@@ -169,7 +169,28 @@ public final class ZuluStore: Sendable {
                 try existing.delete(db)
             }
             for subscription in subscriptions {
-                try ChannelRecord(from: subscription).save(db)
+                // Only the columns the server owns. Saving the whole record would carry
+                // the viewer's own columns along as the defaults the API knows nothing
+                // about, so every sync erased the forum/chat choice and the detector's
+                // cached answer with it.
+                try db.execute(
+                    sql: """
+                        INSERT INTO channel (id, name, description, color, isRestricted, isMuted, pinned)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            name = excluded.name,
+                            description = excluded.description,
+                            color = excluded.color,
+                            isRestricted = excluded.isRestricted,
+                            isMuted = excluded.isMuted,
+                            pinned = excluded.pinned
+                        """,
+                    arguments: [
+                        subscription.stream_id, subscription.name, subscription.description,
+                        subscription.color, subscription.isRestricted,
+                        subscription.is_muted ?? false, subscription.pin_to_top ?? false,
+                    ]
+                )
             }
         }
     }
@@ -315,6 +336,27 @@ extension ZuluStore {
         guard !ids.isEmpty else { return }
         try writer.write { db in
             try UnreadRecord.filter(ids.contains(Column("messageID"))).deleteAll(db)
+        }
+    }
+
+    /// Everything still unread in one conversation, however far back it goes. Reaching the
+    /// live edge of a conversation means you are done with it, not that you are done with
+    /// the dozen messages that happened to be drawn.
+    public func unreadIDs(inChannel channelID: Int, topic: String) throws -> [Int] {
+        try writer.read { db in
+            try Int.fetchAll(
+                db,
+                sql: "SELECT messageID FROM unread WHERE channelID = ? AND topic = ?",
+                arguments: [channelID, topic]
+            )
+        }
+    }
+
+    public func unreadIDs(inDM key: String) throws -> [Int] {
+        try writer.read { db in
+            try Int.fetchAll(
+                db, sql: "SELECT messageID FROM unread WHERE dmKey = ?", arguments: [key]
+            )
         }
     }
 

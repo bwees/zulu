@@ -244,3 +244,60 @@ struct HidingAndAbsorptionTests {
         #expect(promoted.first?.displayName == "standup")
     }
 }
+
+/// Channels and promoted topics are both top-level sidebar rows, so their positions have
+/// to come from one sequence rather than two that happen to start at the same number.
+@MainActor
+struct SidebarOrderTests {
+
+    private func makeStore() throws -> ZuluStore {
+        let store = try ZuluStore(url: nil)
+        try store.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO channel (id, name, isRestricted, isMuted, pinned, detectedForum)
+                VALUES (7, 'engineering', 0, 0, 0, 1), (8, 'design', 0, 0, 0, 0)
+                """)
+            try db.execute(sql: """
+                INSERT INTO topic (channelID, name, maxMessageID) VALUES (7, 'standup', 90)
+                """)
+        }
+        return store
+    }
+
+    private func position(ofChannel id: Int, in store: ZuluStore) throws -> Int? {
+        try store.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT position FROM channel WHERE id = ?", arguments: [id])
+        }
+    }
+
+    private func position(ofTopic topic: String, in store: ZuluStore) throws -> Int? {
+        try store.writer.read { db in
+            try Int.fetchOne(
+                db, sql: "SELECT position FROM promotedTopic WHERE topic = ?", arguments: [topic]
+            )
+        }
+    }
+
+    @Test func aPromotedTopicCanSitBetweenTwoChannels() throws {
+        let store = try makeStore()
+        try store.promote(topic: "standup", inChannel: 7)
+
+        let order: [SidebarSlot] = [
+            .channel(8), .promotedTopic(channelID: 7, topic: "standup"), .channel(7),
+        ]
+        try store.reorderSidebar(order)
+
+        #expect(try position(ofChannel: 8, in: store) == 0)
+        #expect(try position(ofTopic: "standup", in: store) == 1)
+        #expect(try position(ofChannel: 7, in: store) == 2)
+    }
+
+    @Test func aNewPromotionLandsBelowEverythingAlreadyPlaced() throws {
+        let store = try makeStore()
+        try store.reorderSidebar([.channel(8), .channel(7)])
+
+        try store.promote(topic: "standup", inChannel: 7)
+
+        #expect(try position(ofTopic: "standup", in: store) == 2)
+    }
+}

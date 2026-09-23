@@ -8,39 +8,49 @@ struct MessageBody: View {
 
     /// Realm custom emoji are images. They are loaded first so the text can be built with
     /// the picture in place rather than the `:name:` fallback.
-    @State private var emoji: [String: Image] = [:]
+    @State private var emoji: [String: EmojiFrames] = [:]
+
+    /// Custom emoji arrive at whatever size they were uploaded at — often hundreds of
+    /// pixels. `Text` uses an image's intrinsic size, so they are scaled to sit on the
+    /// line rather than tower over it.
+    private static let lineHeight: CGFloat = 20
+
+    /// Fast enough that nothing looks like a slideshow, slow enough that a message full
+    /// of emoji is not redrawn at display rate.
+    private static let tick: TimeInterval = 1.0 / 15
 
     private var blocks: [MessageBlock] { MessageMarkup.blocks(from: html) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(blocks) { block in
-                BlockView(block: block, emoji: emoji)
+        Group {
+            // Redrawing on a clock is only worth it when something in here moves. An
+            // animated emoji cannot live in a `Text`, so the paragraph around it is
+            // rebuilt each tick with the frame for that moment.
+            if emoji.values.contains(where: \.isAnimated) {
+                TimelineView(.periodic(from: .now, by: Self.tick)) { context in
+                    stack(at: context.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                stack(at: 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: html) { await loadEmoji() }
     }
 
-    private func loadEmoji() async {
-        let urls = Set(blocks.flatMap(spans(in:)).compactMap(\.emojiURL))
-        for url in urls where emoji[url] == nil {
-            if let data = await model.imageData(at: url), let image = UIImage(data: data) {
-                emoji[url] = Image(uiImage: Self.scaledToLineHeight(image))
+    private func stack(at time: TimeInterval) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(blocks) { block in
+                BlockView(block: block, emoji: emoji, time: time)
             }
         }
     }
 
-    /// Custom emoji arrive at whatever size they were uploaded at — often hundreds of
-    /// pixels. `Text` uses an image's intrinsic size, so they have to be resized to sit
-    /// on the line rather than tower over it.
-    private static func scaledToLineHeight(_ image: UIImage) -> UIImage {
-        let height: CGFloat = 20
-        guard image.size.height > 0 else { return image }
-        let width = image.size.width * (height / image.size.height)
-        let size = CGSize(width: width, height: height)
-        return UIGraphicsImageRenderer(size: size).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
+    private func loadEmoji() async {
+        let urls = Set(blocks.flatMap(spans(in:)).compactMap(\.emojiURL))
+        for url in urls where emoji[url] == nil {
+            guard let data = await model.imageData(at: url) else { continue }
+            emoji[url] = EmojiFrames.decode(data, height: Self.lineHeight)
         }
     }
 
@@ -49,7 +59,7 @@ struct MessageBody: View {
         case .paragraph(let spans): spans
         case .bulletList(let items), .numberedList(let items): items.flatMap { $0 }
         case .quote(let inner): inner.flatMap(spans(in:))
-        case .quotedReply(_, _, let quoted): quoted.flatMap(spans(in:))
+        case .quotedReply(_, _, _, let quoted): quoted.flatMap(spans(in:))
         case .codeBlock, .image: []
         }
     }
@@ -57,7 +67,9 @@ struct MessageBody: View {
 
 struct BlockView: View {
     let block: MessageBlock
-    let emoji: [String: Image]
+    let emoji: [String: EmojiFrames]
+    /// Which moment of an animated emoji to draw. Constant for messages that have none.
+    var time: TimeInterval = 0
 
     var body: some View {
         switch block {
@@ -70,7 +82,7 @@ struct BlockView: View {
             HStack(alignment: .top, spacing: 8) {
                 Capsule().fill(.tertiary).frame(width: 3)
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(inner) { BlockView(block: $0, emoji: emoji) }
+                    ForEach(inner) { BlockView(block: $0, emoji: emoji, time: time) }
                 }
                 .foregroundStyle(.secondary)
             }
@@ -115,8 +127,10 @@ struct BlockView: View {
         case .image(let source, let link, let alt, let aspectRatio):
             RemoteImage(path: source, fullSize: link, alt: alt, aspectRatio: aspectRatio)
 
-        case .quotedReply(let author, _, let quoted):
-            QuotedReplyView(author: author, quoted: quoted, emoji: emoji)
+        case .quotedReply(let author, let authorID, _, let quoted):
+            QuotedReplyView(
+                author: author, authorID: authorID, quoted: quoted, emoji: emoji, time: time
+            )
         }
     }
 
@@ -125,8 +139,8 @@ struct BlockView: View {
     private func styled(_ spans: [InlineSpan]) -> Text {
         spans.reduce(Text("")) { result, span in
             if let url = span.emojiURL {
-                if let image = emoji[url] {
-                    return result + Text(image).baselineOffset(-2)
+                if let frames = emoji[url] {
+                    return result + Text(frames.frame(at: time)).baselineOffset(-2)
                 }
                 return result + Text(span.text).foregroundColor(.secondary)
             }
@@ -164,8 +178,12 @@ enum RealmContext {
 /// it, because a one-line preview is not always enough to follow the thread.
 private struct QuotedReplyView: View {
     let author: String
+    /// Comes from the silent mention's `data-user-id`, so the header can show the real
+    /// picture of whoever is being answered.
+    let authorID: Int?
     let quoted: [MessageBlock]
-    let emoji: [String: Image]
+    let emoji: [String: EmojiFrames]
+    let time: TimeInterval
 
     @State private var expanded = false
 
@@ -178,7 +196,7 @@ private struct QuotedReplyView: View {
                     Image(systemName: "arrowshape.turn.up.left.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                    Avatar(name: author, size: 16)
+                    SenderAvatar(name: author, userID: authorID, size: 16)
                     Text(author)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -198,7 +216,7 @@ private struct QuotedReplyView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Capsule().fill(.tertiary).frame(width: 3)
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(quoted) { BlockView(block: $0, emoji: emoji) }
+                        ForEach(quoted) { BlockView(block: $0, emoji: emoji, time: time) }
                     }
                     .foregroundStyle(.secondary)
                 }

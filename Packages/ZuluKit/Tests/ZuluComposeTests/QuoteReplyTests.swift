@@ -84,7 +84,7 @@ struct QuoteAndReplyTests {
 
         #expect(MessageMarkup.blocks(from: try serverRendered(markup)) == [
             .quotedReply(
-                author: "Ada Lovelace",
+                author: "Ada Lovelace", authorID: 42,
                 messageID: 99,
                 quoted: [.paragraph([InlineSpan(text: "It works.")])]
             ),
@@ -99,7 +99,7 @@ struct QuoteAndReplyTests {
         let blocks = MessageMarkup.blocks(from: try serverRendered(markup))
 
         #expect(blocks == [
-            .quotedReply(author: "Ada", messageID: 5, quoted: [
+            .quotedReply(author: "Ada", authorID: 42, messageID: 5, quoted: [
                 .codeBlock(language: nil, code: "let x = 1"),
             ]),
         ])

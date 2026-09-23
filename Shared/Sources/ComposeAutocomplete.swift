@@ -88,7 +88,7 @@ final class ComposeAutocompleteController {
     /// what is being typed.
     private static let visibleLimit = 6
 
-    init(model: AppModel, source: ConversationView.Source) {
+    init(model: AppModel, source: ConversationSource) {
         self.model = model
         switch source {
         case .topic(let channelID, let name, _):
@@ -213,7 +213,7 @@ struct SuggestionIcon: View {
     let icon: AutocompleteSuggestion.Icon
 
     @Environment(AppModel.self) private var model
-    @State private var image: UIImage?
+    @State private var image: Image?
 
     var body: some View {
         Group {
@@ -224,7 +224,7 @@ struct SuggestionIcon: View {
                 Image(systemName: name).foregroundStyle(.secondary)
             case .image(let path):
                 if let image {
-                    Image(uiImage: image).resizable().scaledToFit().clipShape(.circle)
+                    image.resizable().scaledToFit().clipShape(.circle)
                 } else {
                     Color.clear.task { await load(path) }
                 }
@@ -234,6 +234,6 @@ struct SuggestionIcon: View {
 
     private func load(_ path: String) async {
         guard !path.isEmpty, let data = await model.imageData(at: path) else { return }
-        image = UIImage(data: data)
+        image = Platform.image(from: data)
     }
 }

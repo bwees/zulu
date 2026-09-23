@@ -141,7 +141,7 @@ struct RealWorldMarkupTests {
     @Test func mentionsAreMarked() {
         let html = #"<p><span class="user-mention silent" data-user-id="2323">Brandon Wees</span> hello</p>"#
         #expect(MessageMarkup.blocks(from: html) == [.paragraph([
-            InlineSpan(text: "Brandon Wees", mention: true),
+            InlineSpan(text: "Brandon Wees", mention: true, mentionedUserID: 2323),
             InlineSpan(text: " hello"),
         ])])
     }
@@ -151,7 +151,7 @@ struct RealWorldMarkupTests {
         let html = ##"<p><span class="user-mention silent" data-user-id="2323">Brandon Wees</span> <a href="#narrow/channel/108/near/498801">said</a>:</p><blockquote><p><img alt="x.png" class="inline-image" src="/user_uploads/thumbnail/x.png/840x560.webp"></p></blockquote><p>Thanks</p>"##
         let blocks = MessageMarkup.blocks(from: html)
         #expect(blocks.count == 2)
-        guard case .quotedReply(let author, let messageID, let quoted) = blocks.first else {
+        guard case .quotedReply(let author, _, let messageID, let quoted) = blocks.first else {
             Issue.record("expected the attribution and quote to fold into a reply")
             return
         }
@@ -171,8 +171,11 @@ struct QuotedReplyTests {
         let html = ##"<p><span class="user-mention silent" data-user-id="2323">Brandon Wees</span> <a href="#narrow/channel/108-immich-off-topic/topic//near/498801">said</a>:</p><blockquote><p>the original words</p></blockquote><p>Thanks</p>"##
         let blocks = MessageMarkup.blocks(from: html)
         #expect(blocks == [
+            // The id comes along so a reply header can show the real avatar of whoever
+            // is being answered rather than falling back to their initials.
             .quotedReply(
                 author: "Brandon Wees",
+                authorID: 2323,
                 messageID: 498801,
                 quoted: [.paragraph([InlineSpan(text: "the original words")])]
             ),
@@ -210,7 +213,7 @@ struct QuotedReplyTests {
     @Test func replyKeepsImagesInsideTheQuotedPart() {
         let html = ##"<p><span class="user-mention silent" data-user-id="1">B</span> <a href="#narrow/channel/1/near/42">said</a>:</p><blockquote><p><img alt="x.png" class="inline-image" src="/user_uploads/thumbnail/x.png"></p></blockquote>"##
         let blocks = MessageMarkup.blocks(from: html)
-        guard case .quotedReply(_, let id, let quoted) = blocks.first else {
+        guard case .quotedReply(_, _, let id, let quoted) = blocks.first else {
             Issue.record("expected a quoted reply")
             return
         }

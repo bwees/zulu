@@ -85,7 +85,7 @@ struct EmojiDisplayView: View {
     var size: CGFloat = 16
 
     @Environment(AppModel.self) private var model
-    @State private var image: UIImage?
+    @State private var frames: EmojiFrames?
 
     /// A unicode emoji drawn at point size N occupies noticeably more than N points — the
     /// glyph overshoots its em box. An image sized to exactly N therefore looks smaller
@@ -110,15 +110,14 @@ struct EmojiDisplayView: View {
 
     @ViewBuilder
     private func imageView(path: String) -> some View {
-        if let image {
-            AnimatedImageView(image: image, size: imageSide)
-                .frame(width: imageSide, height: imageSide)
+        if let frames {
+            AnimatedEmojiView(frames: frames)
         } else {
             Color.clear
                 .frame(width: imageSide, height: imageSide)
                 .task(id: path) {
                     guard let data = await model.imageData(at: path) else { return }
-                    image = AnimatedImage.decode(data)
+                    frames = EmojiFrames.decode(data, height: imageSide)
                 }
         }
     }

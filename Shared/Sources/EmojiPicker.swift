@@ -54,10 +54,10 @@ struct EmojiPicker: View {
                 }
             }
             .navigationTitle("Emoji")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationTitle()
             .searchable(text: $query, prompt: "Search emoji")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
         .presentationDetents([.medium, .large])
@@ -77,14 +77,14 @@ struct EmojiGlyph: View {
     var size: CGFloat = 30
 
     @Environment(AppModel.self) private var model
-    @State private var image: UIImage?
+    @State private var image: Image?
 
     var body: some View {
         Group {
             if let glyph = emoji.glyph {
                 Text(glyph).font(.system(size: size))
             } else if let image {
-                Image(uiImage: image).resizable().scaledToFit()
+                image.resizable().scaledToFit()
             } else {
                 // Until the image lands, the name is still the truth about the emoji —
                 // the same fallback the server's own markdown makes.
@@ -103,6 +103,6 @@ struct EmojiGlyph: View {
         // playing at once is unreadable.
         guard let path = emoji.stillURL ?? emoji.imageURL else { return }
         guard let data = await model.imageData(at: path) else { return }
-        image = UIImage(data: data)
+        image = Platform.image(from: data)
     }
 }

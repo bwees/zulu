@@ -1,11 +1,10 @@
 import SwiftUI
 import ZuluStore
 
-/// A person's own picture in the message list, with the initials circle behind it.
+/// A person's own picture, or their initials when there is no picture to show.
 ///
-/// The initials are not a placeholder to be tolerated: they are what shows for anyone
-/// whose avatar has not loaded or cannot be fetched, and they show immediately, so a
-/// thread never has a row of grey holes in it while pictures arrive.
+/// The initials are shown *instead of* the picture, never behind it: an avatar with any
+/// transparency in it was letting a wheel of colour through from underneath.
 struct SenderAvatar: View {
     let name: String
     var userID: Int?
@@ -15,24 +14,25 @@ struct SenderAvatar: View {
     var size: CGFloat = 36
 
     @Environment(AppModel.self) private var model
-    @State private var image: UIImage?
+    @State private var image: Image?
 
     private var source: String? {
         userID.flatMap { model.users[$0]?.avatarURL } ?? url
     }
 
     var body: some View {
-        Avatar(name: name, size: size)
-            .overlay {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: size, height: size)
-                        .clipShape(.circle)
-                }
+        Group {
+            if let image {
+                image
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(.circle)
+            } else {
+                Avatar(name: name, size: size)
             }
-            .task(id: source) { await load() }
+        }
+        .task(id: source) { await load() }
     }
 
     private func load() async {
@@ -40,6 +40,6 @@ struct SenderAvatar: View {
         // Gravatar and the realm's own uploads both arrive here; `imageData` decides
         // which of them may see the account's credentials.
         guard let data = await model.imageData(at: source) else { return }
-        image = UIImage(data: data)
+        image = Platform.image(from: data)
     }
 }

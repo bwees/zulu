@@ -4,6 +4,7 @@ import GRDB
 import Observation
 import SwiftUI
 import ZulipAPI
+import ZuluCompose
 import ZuluMarkup
 import ZuluStore
 import ZuluSync
@@ -41,7 +42,9 @@ final class AppModel {
     private(set) var dms: [DMSummary] = []
     private(set) var users: [Int: UserRecord] = [:]
 
-    var destination: Destination?
+    var destination: Destination? {
+        didSet { rememberDestination() }
+    }
     var signInError: String?
     /// Set when a freshly made group should open its editor straight away.
     var pendingGroupToEdit: String?
@@ -77,6 +80,7 @@ final class AppModel {
 
             observe(store)
             startSidebarObservations()
+            restoreDestination()
             phase = .signedIn
 
             await sync.onStatusChange { [weak self] status in
@@ -183,6 +187,7 @@ final class AppModel {
         dms = []
         users = [:]
         destination = nil
+        UserDefaults.standard.removeObject(forKey: Self.lastDestinationKey)
         phase = .signedOut
     }
 
@@ -270,9 +275,13 @@ enum WebAuthSession {
     static func run(url: URL, callbackScheme: String) async throws -> URL {
         final class Anchor: NSObject, ASWebAuthenticationPresentationContextProviding {
             func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+                #if os(iOS)
                 UIApplication.shared.connectedScenes
                     .compactMap { ($0 as? UIWindowScene)?.keyWindow }
                     .first ?? ASPresentationAnchor()
+                #else
+                NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+                #endif
             }
         }
         let anchor = Anchor()
@@ -353,6 +362,64 @@ extension AppModel {
         // A failure here is not worth surfacing: the next register snapshot re-reads the
         // server's own view and the counts correct themselves.
         try? await client?.markRead(messageIDs: ids)
+    }
+
+    /// Sending every id at once is what a long-unread topic actually needs, and what the
+    /// server would rather receive than four hundred requests.
+    private static let markReadBatch = 1000
+
+    /// Reaching the bottom of a conversation clears the whole conversation, not only the
+    /// messages that were drawn on the way there.
+    func markConversationRead(_ source: ConversationSource) async {
+        guard let store else { return }
+        let ids: [Int]
+        switch source {
+        case .topic(let channelID, let name, _):
+            ids = (try? store.unreadIDs(inChannel: channelID, topic: name)) ?? []
+        case .dm(let key):
+            ids = (try? store.unreadIDs(inDM: key)) ?? []
+        }
+        for start in stride(from: 0, to: ids.count, by: Self.markReadBatch) {
+            await markRead(Array(ids[start..<min(start + Self.markReadBatch, ids.count)]))
+        }
+    }
+}
+
+// MARK: - Replies
+
+extension AppModel {
+    /// Zulip's quote-and-reply block for one message, ready to sit above what was typed.
+    ///
+    /// Quotes the markdown the author wrote, not the HTML the server rendered: sending
+    /// HTML back would have the server render it a second time.
+    func quotedPrefix(
+        for reply: ReplyDraft, in source: ConversationSource
+    ) async -> String? {
+        guard let account else { return nil }
+        let raw = (try? await ZulipClient(account: account).rawContent(ofMessage: reply.messageID))
+            ?? reply.preview
+
+        return ComposeMarkup.quoteAndReply(
+            author: reply.author,
+            authorID: reply.authorID,
+            messageID: reply.messageID,
+            location: Self.location(of: source, selfUserID: selfUserID),
+            realmURL: account.realmURL,
+            rawContent: raw
+        )
+    }
+
+    private static func location(
+        of source: ConversationSource, selfUserID: Int?
+    ) -> ComposeMarkup.MessageLocation {
+        switch source {
+        case .topic(let channelID, let name, let channelName):
+            return .topic(channelID: channelID, channelName: channelName, topic: name)
+        case .dm(let key):
+            let ids = key.split(separator: ",").compactMap { Int($0) }
+            let others = ids.filter { $0 != selfUserID }
+            return .directMessage(userIDs: others.isEmpty ? ids : others)
+        }
     }
 }
 
@@ -569,5 +636,57 @@ extension AppModel {
 
         guard let body else { return speaker.isEmpty ? nil : "\(speaker): Image" }
         return speaker.isEmpty ? body : "\(speaker): \(body)"
+    }
+}
+
+extension AppModel {
+    func reorderSidebar(_ slots: [SidebarSlot]) {
+        try? store?.reorderSidebar(slots)
+    }
+}
+
+// MARK: - Where you were
+
+extension AppModel {
+    private static let lastDestinationKey = "com.bwees.zulu.lastDestination"
+
+    /// Reopening on the conversation you left is the difference between a chat app and a
+    /// filing cabinet. Stored in defaults rather than the database because it is about this
+    /// device's last session, not about the account.
+    func rememberDestination() {
+        guard let destination else {
+            UserDefaults.standard.removeObject(forKey: Self.lastDestinationKey)
+            return
+        }
+        let encoded: [String: String] = switch destination {
+        case .channel(let id):
+            ["kind": "channel", "channel": String(id)]
+        case .dm(let key):
+            ["kind": "dm", "key": key]
+        case .topic(let channelID, let name, let channelName):
+            ["kind": "topic", "channel": String(channelID), "name": name, "channelName": channelName]
+        }
+        UserDefaults.standard.set(encoded, forKey: Self.lastDestinationKey)
+    }
+
+    func restoreDestination() {
+        guard destination == nil,
+              let stored = UserDefaults.standard.dictionary(forKey: Self.lastDestinationKey)
+                as? [String: String]
+        else { return }
+
+        switch stored["kind"] {
+        case "channel":
+            if let id = stored["channel"].flatMap(Int.init) { destination = .channel(id) }
+        case "dm":
+            if let key = stored["key"] { destination = .dm(key) }
+        case "topic":
+            if let id = stored["channel"].flatMap(Int.init),
+               let name = stored["name"], let channelName = stored["channelName"] {
+                destination = .topic(channelID: id, name: name, channelName: channelName)
+            }
+        default:
+            break
+        }
     }
 }

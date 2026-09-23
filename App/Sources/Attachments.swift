@@ -44,6 +44,3 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
-extension UTType {
-    var preferredMIME: String { preferredMIMEType ?? "application/octet-stream" }
-}

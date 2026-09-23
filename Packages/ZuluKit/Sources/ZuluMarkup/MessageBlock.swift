@@ -13,11 +13,14 @@ public struct InlineSpan: Sendable, Equatable {
     public var emojiURL: String?
     /// An @-mention of a person or group.
     public var mention = false
+    /// The person an @-mention names, when Zulip told us who they are. Lets a reply
+    /// header show their real picture rather than their initials.
+    public var mentionedUserID: Int?
 
     public init(
         text: String, bold: Bool = false, italic: Bool = false, code: Bool = false,
         strikethrough: Bool = false, link: String? = nil, emojiURL: String? = nil,
-        mention: Bool = false
+        mention: Bool = false, mentionedUserID: Int? = nil
     ) {
         self.text = text
         self.bold = bold
@@ -27,6 +30,7 @@ public struct InlineSpan: Sendable, Equatable {
         self.link = link
         self.emojiURL = emojiURL
         self.mention = mention
+        self.mentionedUserID = mentionedUserID
     }
 }
 
@@ -43,7 +47,7 @@ public enum MessageBlock: Sendable, Equatable, Identifiable {
     case image(source: String, link: String?, alt: String?, aspectRatio: Double? = nil)
     /// Zulip's quote-and-reply: an attribution line followed by a blockquote. Kept as one
     /// thing so it can be drawn as a compact reply header rather than a wall of quote.
-    case quotedReply(author: String, messageID: Int?, quoted: [MessageBlock])
+    case quotedReply(author: String, authorID: Int?, messageID: Int?, quoted: [MessageBlock])
 
     public var id: String {
         switch self {
@@ -53,7 +57,7 @@ public enum MessageBlock: Sendable, Equatable, Identifiable {
         case .bulletList(let items): "ul:" + items.flatMap { $0 }.map(\.text).joined()
         case .numberedList(let items): "ol:" + items.flatMap { $0 }.map(\.text).joined()
         case .image(let source, _, _, _): "img:\(source)"
-        case .quotedReply(let author, let messageID, _): "reply:\(author):\(messageID ?? 0)"
+        case .quotedReply(let author, _, let messageID, _): "reply:\(author):\(messageID ?? 0)"
         }
     }
 }
@@ -84,6 +88,7 @@ public enum MessageMarkup {
                let attribution = attribution(from: spans) {
                 output.append(.quotedReply(
                     author: attribution.author,
+                    authorID: attribution.authorID,
                     messageID: attribution.messageID,
                     quoted: quoted
                 ))
@@ -96,7 +101,9 @@ public enum MessageMarkup {
         return output
     }
 
-    private static func attribution(from spans: [InlineSpan]) -> (author: String, messageID: Int?)? {
+    private static func attribution(
+        from spans: [InlineSpan]
+    ) -> (author: String, authorID: Int?, messageID: Int?)? {
         guard let mention = spans.first(where: \.mention) else { return nil }
         guard let link = spans.compactMap(\.link).first(where: { $0.contains("/near/") })
         else { return nil }
@@ -105,7 +112,7 @@ public enum MessageMarkup {
         let text = spans.map(\.text).joined().trimmingCharacters(in: .whitespaces)
         guard text.hasSuffix(":") else { return nil }
         let id = link.split(separator: "/").last.flatMap { Int($0) }
-        return (mention.text.trimmingCharacters(in: .whitespaces), id)
+        return (mention.text.trimmingCharacters(in: .whitespaces), mention.mentionedUserID, id)
     }
 
     private static func collect(_ nodes: [HTMLNode], into blocks: inout [MessageBlock]) {
@@ -306,6 +313,7 @@ public enum MessageMarkup {
                     if element.classes.contains("user-mention")
                         || element.classes.contains("user-group-mention") {
                         style.mention = true
+                        style.mentionedUserID = element.attribute("data-user-id").flatMap(Int.init)
                     }
                 case "img":
                     // Realm custom emoji are images. They keep their place in the text and

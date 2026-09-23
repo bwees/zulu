@@ -26,7 +26,7 @@ private struct MessageActionsModifier: ViewModifier {
                 .contentShape(.rect)
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.35).onEnded { _ in
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        Platform.tap()
                         showingActions = true
                     }
                 )
@@ -123,10 +123,8 @@ struct MessageActionsSheet: View {
             row("Add Reaction", "face.smiling") { showingPicker = true }
             Divider()
             row("Reply", "arrowshape.turn.up.left") {
-                Task {
-                    await controller.reply()
-                    dismiss()
-                }
+                controller.reply()
+                dismiss()
             }
             Divider()
             row("Copy Text", "doc.on.doc") {
@@ -246,34 +244,24 @@ final class MessageActionsController {
 
     // MARK: the message itself
 
-    /// Quotes the markdown source, not the rendered HTML: quoting HTML back at the server
-    /// would render it a second time.
-    func reply() async {
-        guard let account else { return }
-        let raw = (try? await ZulipClient(account: account).rawContent(ofMessage: message.id))
-            ?? plainText
-
+    /// Hands the composer the message, not the quote markdown. The markdown is built when
+    /// the reply is actually sent, so what is on screen while typing stays readable.
+    func reply() {
         ComposerInbox.shared.deliver(
-            ComposeMarkup.quoteAndReply(
-                author: message.senderName,
-                authorID: message.senderID,
-                messageID: message.id,
-                location: location,
-                realmURL: account.realmURL,
-                rawContent: raw
-            ),
-            to: ConversationKey.of(message)
+            reply: ReplyDraft(message: message), to: ConversationKey.of(message)
         )
     }
 
     func copyText() {
-        UIPasteboard.general.string = plainText
+        Platform.copyToClipboard(plainText)
     }
 
     func copyLink() {
         guard let account else { return }
-        UIPasteboard.general.string = ComposeMarkup.permalink(
-            toMessage: message.id, in: location, realmURL: account.realmURL
+        Platform.copyToClipboard(
+            ComposeMarkup.permalink(
+                toMessage: message.id, in: location, realmURL: account.realmURL
+            )
         )
     }
 
@@ -294,8 +282,10 @@ final class MessageActionsController {
 
     /// Falls out of the same blocks the message is drawn from, so what gets copied is
     /// what is on screen — and it costs no round trip.
-    private var plainText: String {
-        MessageMarkup.blocks(from: message.renderedContent)
+    private var plainText: String { Self.plainText(of: message.renderedContent) }
+
+    static func plainText(of renderedContent: String) -> String {
+        MessageMarkup.blocks(from: renderedContent)
             .map(MessageActionsController.text(of:))
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
@@ -305,7 +295,7 @@ final class MessageActionsController {
         switch block {
         case .paragraph(let spans):
             spans.map(\.text).joined()
-        case .quote(let inner), .quotedReply(_, _, let inner):
+        case .quote(let inner), .quotedReply(_, _, _, let inner):
             inner.map(text(of:)).joined(separator: "\n")
         case .codeBlock(_, let code):
             code
@@ -323,7 +313,7 @@ final class MessageActionsController {
 /// Which conversation a draft belongs to, spelled the same way whether it is derived
 /// from the open conversation or from one message in it.
 enum ConversationKey {
-    static func of(_ source: ConversationView.Source) -> String {
+    static func of(_ source: ConversationSource) -> String {
         switch source {
         case .topic(let channelID, let name, _): "c:\(channelID)/\(name)"
         case .dm(let key): "d:\(key)"
@@ -351,6 +341,7 @@ final class ComposerInbox {
     private(set) var deliveries = 0
 
     private var pending: [String: String] = [:]
+    private var replies: [String: ReplyDraft] = [:]
 
     func deliver(_ text: String, to conversation: String) {
         pending[conversation, default: ""] += text
@@ -359,5 +350,16 @@ final class ComposerInbox {
 
     func take(for conversation: String) -> String? {
         pending.removeValue(forKey: conversation)
+    }
+
+    /// Replacing rather than accumulating: a message answers one other message, and
+    /// swiping a second one means you changed your mind about which.
+    func deliver(reply: ReplyDraft, to conversation: String) {
+        replies[conversation] = reply
+        deliveries += 1
+    }
+
+    func takeReply(for conversation: String) -> ReplyDraft? {
+        replies.removeValue(forKey: conversation)
     }
 }

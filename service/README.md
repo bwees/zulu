@@ -45,6 +45,10 @@ a network, or a clock.
 
 ## Running it
 
+To deploy it for real — APNs credentials, HTTPS, verifying a push, and what to
+check when one does not arrive — follow [SETUP.md](SETUP.md). What is below is
+the short version for running it locally.
+
 ```sh
 export ZULU_KEY_ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
 export ZULU_APNS_DRY_RUN=true          # log pushes instead of sending them

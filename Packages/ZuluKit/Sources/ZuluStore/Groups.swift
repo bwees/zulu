@@ -104,7 +104,8 @@ extension ZuluStore {
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
+                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
+                       c.position
                   FROM channel c
                  WHERE \(membership)
                    AND \(ChannelVisibility.clause)

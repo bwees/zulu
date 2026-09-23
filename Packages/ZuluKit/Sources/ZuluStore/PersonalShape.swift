@@ -40,6 +40,9 @@ public struct PromotedTopicSummary: Decodable, FetchableRecord, Sendable, Identi
     public var isRestricted: Bool
     public var unreadCount: Int
     public var mentionCount: Int
+    /// On the same scale as `ChannelSummary.position`: a promoted topic and a channel
+    /// sit in one sidebar, so they are ordered against each other, not separately.
+    public var position: Int?
 
     public var id: String { "\(channelID)\u{1F}\(topic)" }
     /// The name you gave it, or the topic itself. Promoting `general chat` out of a
@@ -89,13 +92,24 @@ extension ZuluStore {
 
     // MARK: promotions
 
+    /// A promotion with no group named inherits the channel's own, so a topic lifted
+    /// out of a grouped channel stays where that channel lives instead of vanishing
+    /// into the unfiled pile the viewer is not looking at.
     public func promote(topic: String, inChannel channelID: Int, toGroup groupID: String? = nil) throws {
         try writer.write { db in
-            let next = try Int.fetchOne(
-                db, sql: "SELECT COALESCE(MAX(position), -1) + 1 FROM promotedTopic"
-            ) ?? 0
+            let group = try groupID ?? String.fetchOne(
+                db,
+                sql: "SELECT groupID FROM channelGroupMember WHERE channelID = ?",
+                arguments: [channelID]
+            )
+            let next = try Int.fetchOne(db, sql: """
+                SELECT COALESCE(MAX(position), -1) + 1 FROM (
+                    SELECT position FROM promotedTopic
+                    UNION ALL SELECT position FROM channel
+                )
+                """) ?? 0
             try PromotedTopicRecord(
-                channelID: channelID, topic: topic, groupID: groupID, position: next
+                channelID: channelID, topic: topic, groupID: group, position: next
             ).save(db)
         }
     }
@@ -156,7 +170,8 @@ extension ZuluStore {
                          WHERE u.channelID = p.channelID AND u.topic = p.topic) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = p.channelID AND u.topic = p.topic
-                           AND u.isMention = 1) AS mentionCount
+                           AND u.isMention = 1) AS mentionCount,
+                       p.position
                   FROM promotedTopic p
                   JOIN channel c ON c.id = p.channelID
                  WHERE \(membership)
@@ -218,7 +233,8 @@ extension ZuluStore {
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount
+                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
+                       c.position
                   FROM channel c
                  WHERE c.hidden = 1
                  ORDER BY name COLLATE NOCASE
@@ -256,21 +272,36 @@ extension ZuluStore {
         }
     }
 
-    /// Writes an explicit order for exactly the channels listed, leaving every other
-    /// channel unplaced.
-    public func reorderChannels(ids: [Int]) throws {
+    /// Writes an explicit order for exactly the rows listed, leaving everything else
+    /// unplaced. Channels and promoted topics share one sequence because they share one
+    /// sidebar — a promoted topic is a top-level row, not an appendix to the channel list.
+    public func reorderSidebar(_ slots: [SidebarSlot]) throws {
         try writer.write { db in
-            for (index, id) in ids.enumerated() {
-                try db.execute(
-                    sql: "UPDATE channel SET position = ? WHERE id = ?", arguments: [index, id]
-                )
+            for (index, slot) in slots.enumerated() {
+                switch slot {
+                case .channel(let id):
+                    try db.execute(
+                        sql: "UPDATE channel SET position = ? WHERE id = ?",
+                        arguments: [index, id]
+                    )
+                case .promotedTopic(let channelID, let topic):
+                    try db.execute(
+                        sql: """
+                            UPDATE promotedTopic SET position = ?
+                             WHERE channelID = ? AND topic = ?
+                            """,
+                        arguments: [index, channelID, topic]
+                    )
+                }
             }
         }
     }
 
-    public func clearChannelOrder() throws {
-        try writer.write { db in
-            try db.execute(sql: "UPDATE channel SET position = NULL")
-        }
-    }
+}
+
+/// One draggable row in the sidebar. Forum topics are absent on purpose: they hang under
+/// their channel and move with it.
+public enum SidebarSlot: Hashable, Sendable {
+    case channel(Int)
+    case promotedTopic(channelID: Int, topic: String)
 }

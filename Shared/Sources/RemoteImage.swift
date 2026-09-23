@@ -12,13 +12,13 @@ struct RemoteImage: View {
     var aspectRatio: Double?
 
     @Environment(AppModel.self) private var model
-    @State private var image: UIImage?
+    @State private var image: Image?
     @State private var failed = false
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
+                image
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -39,7 +39,7 @@ struct RemoteImage: View {
         .frame(maxWidth: 320, alignment: .leading)
         .task(id: path) {
             guard image == nil else { return }
-            if let data = await model.imageData(at: path), let decoded = UIImage(data: data) {
+            if let data = await model.imageData(at: path), let decoded = Platform.image(from: data) {
                 image = decoded
             } else {
                 failed = true

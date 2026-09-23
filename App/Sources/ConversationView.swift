@@ -5,19 +5,18 @@ import ZuluStore
 /// One conversation: a channel topic, or a DM. Reads messages out of the store and
 /// backfills history, since the event queue only carries what arrives after it opened.
 struct ConversationView: View {
-    enum Source: Equatable, Hashable {
-        case topic(channelID: Int, name: String, channelName: String)
-        case dm(key: String)
-    }
+    /// Spelled out here as well because the whole iOS shell navigates by
+    /// `ConversationView.Source`, and the type itself is shared with the Mac app.
+    typealias Source = ConversationSource
 
     let source: Source
     @Environment(AppModel.self) private var model
 
     @State private var loader: MessageHistoryLoader?
     @State private var readTracker: ReadTracker?
-    /// The message SwiftUI keeps pinned across data changes. Never written during a
+    /// Holds the message SwiftUI keeps pinned across data changes. Never written during a
     /// prepend — that is precisely what makes older messages arrive without a jump.
-    @State private var anchoredMessageID: Int?
+    @State private var scroll = ScrollPosition(idType: Int.self)
     @State private var atBottom = true
 
     var body: some View {
@@ -51,6 +50,9 @@ struct ConversationView: View {
             self.loader = loader
             readTracker = ReadTracker { ids in await model.markRead(ids) }
             await loader.start()
+            // A conversation always opens at its live edge, so opening it is reaching
+            // the end of it.
+            await model.markConversationRead(source)
         }
         .onDisappear {
             loader?.stop()
@@ -81,6 +83,12 @@ struct ConversationView: View {
                             reactions: loader.reactions[entry.message.id] ?? []
                         )
                             .padding(.top, entry.startsGroup ? 14 : 2)
+                            .swipeToReply {
+                                ComposerInbox.shared.deliver(
+                                    reply: ReplyDraft(message: entry.message),
+                                    to: ConversationKey.of(source)
+                                )
+                            }
                     }
                     .onAppear { readTracker?.sawMessage(id: entry.message.id) }
                     .id(entry.message.id)
@@ -94,7 +102,7 @@ struct ConversationView: View {
         // Anchoring by item identity is what keeps the view still while older messages are
         // prepended. Correcting the offset after the fact — the previous approach — fights
         // this mechanism instead of using it.
-        .scrollPosition(id: $anchoredMessageID, anchor: .top)
+        .scrollPosition($scroll, anchor: .top)
         .defaultScrollAnchor(.bottom)
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         .onScrollPhaseChange { _, phase in loader.noteScrollPhase(phase) }
@@ -107,15 +115,16 @@ struct ConversationView: View {
             return fromBottom < 120
         } action: { _, isNearBottom in
             atBottom = isNearBottom
+            // Scrolling back down after reading history, and catching up on messages that
+            // arrived while the conversation was open, both land here.
+            if isNearBottom {
+                Task { await model.markConversationRead(source) }
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             if !atBottom {
                 Button {
-                    // ScrollPosition holds the anchor, so going through it wins against an
-                    // inertial scroll still in flight.
-                    // Moving the anchor to the newest message is the same mechanism that
-                    // holds position, so it wins against an inertial scroll in flight.
-                    withAnimation(.snappy) { anchoredMessageID = loader.messages.last?.id }
+                    withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(.body.weight(.semibold))
@@ -132,9 +141,13 @@ struct ConversationView: View {
         // The identity anchor pins whatever is on screen, which is right while
         // reading back but wrong at the live edge: a new message would arrive below
         // the fold. Following it only while already at the bottom keeps both.
+        //
+        // The bottom edge, not the new message's id: anchoring an id scrolls that
+        // message's top to the top of the viewport, which runs off the end of the
+        // content when the message is the last one.
         .onChange(of: loader.messages.last?.id) { _, newest in
-            guard atBottom, let newest else { return }
-            withAnimation(.easeOut(duration: 0.2)) { anchoredMessageID = newest }
+            guard atBottom, newest != nil else { return }
+            withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
         }
     }
 
@@ -153,74 +166,3 @@ struct ConversationView: View {
     }
 }
 
-struct UnreadDivider: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(.red.opacity(0.6)).frame(height: 1)
-            Text("Unread").font(.caption2.weight(.semibold)).foregroundStyle(.red)
-            Rectangle().fill(.red.opacity(0.6)).frame(height: 1)
-        }
-    }
-}
-
-struct MessageRow: View {
-    let message: MessageRecord
-    var startsGroup = true
-    var reactions: [ReactionGroup] = []
-
-    private static let avatarSize: CGFloat = 36
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if startsGroup {
-                SenderAvatar(
-                    name: message.senderName,
-                    userID: message.senderID,
-                    url: message.senderAvatar,
-                    size: Self.avatarSize
-                )
-            } else {
-                // Continuations keep the text aligned under the header above them.
-                Color.clear.frame(width: Self.avatarSize, height: 1)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                if startsGroup {
-                    HStack(spacing: 6) {
-                        Text(message.senderName).font(.subheadline.weight(.semibold))
-                        Text(message.date, format: .dateTime.hour().minute())
-                            .font(.caption).foregroundStyle(.secondary)
-                        if message.editedAt != nil {
-                            Text("edited").font(.caption2).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                MessageContent(message: message).messageActions(message, reactions: reactions)
-            }
-        }
-    }
-}
-
-struct Avatar: View {
-    let name: String
-    var size: CGFloat = 36
-
-    private var tint: Color {
-        // Swift reseeds hashValue per process, so a name would change colour on every
-        // launch. This one is stable.
-        let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .indigo]
-        let seed = name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFFFF }
-        return palette[seed % palette.count]
-    }
-
-    var body: some View {
-        Circle()
-            .fill(tint.gradient)
-            .frame(width: size, height: size)
-            .overlay(
-                Text(name.prefix(1).uppercased())
-                    .font(.system(size: size * 0.45, weight: .semibold))
-                    .foregroundStyle(.white)
-            )
-    }
-}

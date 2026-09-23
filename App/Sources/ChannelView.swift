@@ -62,7 +62,7 @@ struct ChannelView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .navigationTitle("#\(channel.name)")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refreshTopics() }

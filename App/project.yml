@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.bwees
   deploymentTarget:
     iOS: "27.0"
+    macOS: "27.0"
   createIntermediateGroups: true
 packages:
   ZuluKit:
@@ -11,7 +12,7 @@ targets:
   Zulu:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources: [Sources, ../Shared/Sources]
     dependencies:
       - package: ZuluKit
         product: ZulipAPI
@@ -63,3 +64,50 @@ targets:
         # gives the app a real application-identifier, which moves its default
         # keychain access group and hides the API key AccountStorage already wrote.
         # Signing settings are passed to the release archive by xcodebuild instead.
+
+  ZuluMac:
+    type: application
+    platform: macOS
+    sources: [../Mac/Sources, ../Shared/Sources]
+    dependencies:
+      - package: ZuluKit
+        product: ZulipAPI
+      - package: ZuluKit
+        product: ZuluStore
+      - package: ZuluKit
+        product: ZuluSync
+      - package: ZuluKit
+        product: ZuluMarkup
+      - package: ZuluKit
+        product: ZuluEmoji
+      - package: ZuluKit
+        product: ZuluCompose
+      - package: ZuluKit
+        product: ZuluPolls
+    info:
+      path: ZuluMac-Info.plist
+      properties:
+        CFBundleDisplayName: Zulu
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        # The Zulip server hardcodes a zulip:// redirect for the SSO flow, so the
+        # scheme is not ours to choose.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.bwees.zulu
+            CFBundleURLSchemes: [zulip]
+    entitlements:
+      path: ZuluMac.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu
+        SWIFT_VERSION: "6.0"
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # Same reasoning as the iOS target: a team here moves the keychain access
+        # group out from under what AccountStorage already wrote.

@@ -23,13 +23,13 @@ final class MessageHistoryLoader {
     private(set) var isReady = false
     private(set) var reactions: [Int: [ReactionGroup]] = [:]
 
-    private let source: ConversationView.Source
+    private let source: ConversationSource
     private let model: AppModel
     private var scrollPhase: ScrollPhase = .idle
     private var observationTask: Task<Void, Never>?
     private var reactionTask: Task<Void, Never>?
 
-    init(source: ConversationView.Source, model: AppModel) {
+    init(source: ConversationSource, model: AppModel) {
         self.source = source
         self.model = model
     }

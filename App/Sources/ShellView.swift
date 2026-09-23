@@ -22,6 +22,7 @@ struct ShellView: View {
     @State private var aliasDraft = ""
     @State private var promotedTask: Task<Void, Never>?
     @State private var showingHidden = false
+    @State private var showingReorder = false
     @State private var renamingPromoted: PromotedTopicSummary?
     @State private var editingGroup: String?
     @State private var creatingGroup = false
@@ -69,7 +70,10 @@ struct ShellView: View {
                             .offset(x: offset)
                     }
                 }
-                .gesture(
+                // Simultaneous, not exclusive: a plain `.gesture` loses the opening
+                // swipe to the conversation's own scroll view, which claims the touch
+                // first. Closing worked only because the dimming overlay sat on top.
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 12)
                         .onChanged { value in
                             guard abs(value.translation.width) > abs(value.translation.height) else { return }
@@ -207,7 +211,7 @@ struct ShellView: View {
     private var listTitle: String {
         switch section {
         case .dms: "Direct Messages"
-        case .unfiled: model.groups.isEmpty ? "Channels" : "Unfiled"
+        case .unfiled: "Channels"
         case .group(let id): model.groups.first { $0.id == id }?.name ?? "Channels"
         }
     }
@@ -219,6 +223,9 @@ struct ShellView: View {
                 Spacer(minLength: 4)
                 SyncDot(status: model.status)
                 Menu {
+                    Button("Reorder channels", systemImage: "arrow.up.arrow.down") {
+                        showingReorder = true
+                    }
                     Button("Hidden channels", systemImage: "eye.slash") { showingHidden = true }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -241,17 +248,19 @@ struct ShellView: View {
                     if section == .dms {
                         ForEach(model.dms) { dm in dmRow(dm) }
                     } else {
-                        ForEach(visiblePromoted) { promoted in
-                            promotedRow(promoted)
-                        }
-                        ForEach(visibleChannels) { channel in
-                            VStack(alignment: .leading, spacing: 0) {
-                                channelRow(channel)
-                                if channel.rendersAsForum {
-                                    topicBranch(under: channel)
+                        ForEach(sidebarEntries) { entry in
+                            switch entry {
+                            case .promoted(let promoted):
+                                promotedRow(promoted)
+                            case .channel(let channel):
+                                VStack(alignment: .leading, spacing: 0) {
+                                    channelRow(channel)
+                                    if channel.rendersAsForum {
+                                        topicBranch(under: channel)
+                                    }
                                 }
+                                .padding(.bottom, 6)
                             }
-                            .padding(.bottom, 6)
                         }
                         if visibleChannels.isEmpty {
                             Text(emptyListMessage)
@@ -269,6 +278,10 @@ struct ShellView: View {
         }
         .background(DrawerPalette.list.ignoresSafeArea(edges: .vertical))
         .task(id: section) { await observeChannels() }
+    }
+
+    private var sidebarEntries: [SidebarEntry] {
+        SidebarEntry.merged(channels: visibleChannels, promoted: visiblePromoted)
     }
 
     private var emptyListMessage: String {
@@ -530,6 +543,7 @@ struct ShellView: View {
                 }
         }
         .sheet(isPresented: $showingHidden) { HiddenChannelsView() }
+        .sheet(isPresented: $showingReorder) { ReorderChannelsView(entries: sidebarEntries) }
         .sheet(item: Binding(get: { editingGroup.map(Identified.init) },
                              set: { editingGroup = $0?.value })) { wrapper in
             GroupEditor(groupID: wrapper.value)
@@ -621,86 +635,6 @@ struct ShellView: View {
                 ? "Syncing your channels…"
                 : "Pick a channel to start reading.")
         }
-    }
-}
-
-struct EmptyStateView: View {
-    let text: String
-    var body: some View {
-        VStack {
-            Spacer()
-            Text(text).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
-            Spacer()
-        }
-        .navigationTitle("Zulu")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct SyncDot: View {
-    let status: SyncStatus
-
-    private var tint: Color {
-        switch status {
-        case .live: .green
-        case .connecting: .orange
-        case .failed: .red
-        case .idle: .gray
-        }
-    }
-
-    var body: some View {
-        Circle()
-            .fill(tint)
-            .frame(width: 7, height: 7)
-            .help(label)
-    }
-
-    private var label: String {
-        switch status {
-        case .live: "Connected"
-        case .connecting: "Connecting"
-        case .failed(let message): message
-        case .idle: "Not connected"
-        }
-    }
-}
-
-struct Badge: View {
-    let count: Int
-    var mention = false
-
-    var body: some View {
-        if count > 0 {
-            Text(count > 99 ? "99+" : "\(count)")
-                .font(.caption2.weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(mention ? Color.red : Color.secondary, in: Capsule())
-        }
-    }
-}
-
-struct ChannelIcon: View {
-    let isForum: Bool
-    var restricted = false
-    var size: CGFloat = 15
-    var cutout: Color = Color(.systemGroupedBackground)
-
-    var body: some View {
-        Image(systemName: isForum ? "bubble.left.and.text.bubble.right" : "number")
-            .font(.system(size: size))
-            .overlay(alignment: .topTrailing) {
-                if restricted {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: size * 0.5, weight: .bold))
-                        .padding(size * 0.14)
-                        .background(cutout, in: Circle())
-                        .offset(x: size * 0.34, y: -size * 0.2)
-                }
-            }
     }
 }
 
