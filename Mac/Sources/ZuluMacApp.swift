@@ -54,6 +54,16 @@ enum SidebarSection: Equatable, Hashable {
     case group(String)
     /// Channels no group has claimed, so filing is optional rather than required.
     case unfiled
+
+    private static let groupPrefix = "group:"
+
+    var storageKey: String {
+        switch self {
+        case .dms: "dms"
+        case .unfiled: "unfiled"
+        case .group(let id): Self.groupPrefix + id
+        }
+    }
 }
 
 /// Everything the menu bar and the shell have to agree on: which sheets are up, which
@@ -83,6 +93,27 @@ final class MacUIState {
 
     func requestComposerFocus() { composerFocusRequests += 1 }
     func requestMarkRead() { markReadRequests += 1 }
+
+    private static let sectionDestinationsKey = "com.bwees.zulu.sectionDestinations"
+
+    /// The chat last open in each section, so switching sections picks up where that
+    /// section was left.
+    private var sectionDestinations: [String: [String: String]] =
+        UserDefaults.standard.dictionary(forKey: sectionDestinationsKey) as? [String: [String: String]] ?? [:]
+
+    func lastDestination(in section: SidebarSection) -> AppModel.Destination? {
+        sectionDestinations[section.storageKey].flatMap(AppModel.Destination.init(encoded:))
+    }
+
+    func remember(_ destination: AppModel.Destination, in section: SidebarSection) {
+        sectionDestinations[section.storageKey] = destination.encoded
+        UserDefaults.standard.set(sectionDestinations, forKey: Self.sectionDestinationsKey)
+    }
+
+    func forgetSectionDestinations() {
+        sectionDestinations = [:]
+        UserDefaults.standard.removeObject(forKey: Self.sectionDestinationsKey)
+    }
 
     /// `sheet(item:)` needs something Identifiable, and a bare String is not.
     struct GroupBox: Identifiable {

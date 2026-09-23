@@ -136,7 +136,10 @@ struct MacShellView: View {
                 isPresented: $ui.confirmingSignOut,
                 titleVisibility: .visible
             ) {
-                Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
+                Button("Sign Out", role: .destructive) {
+                    ui.forgetSectionDestinations()
+                    Task { await model.signOut() }
+                }
             } message: {
                 Text("Your channel groups, renames and hidden channels on this Mac are removed with it.")
             }
@@ -161,6 +164,14 @@ struct MacShellView: View {
                 MacSidebarFooter()
             }
         }
+        .onChange(of: model.destination) { _, destination in
+            guard let destination else { return }
+            ui.remember(destination, in: section(for: destination))
+        }
+        .onChange(of: ui.section) { _, section in
+            guard model.destination.map(self.section(for:)) != section else { return }
+            model.destination = ui.lastDestination(in: section)
+        }
     }
 
     /// Rows carry a `tag`, not a `NavigationLink`. In a `List(selection:)` driving a
@@ -183,6 +194,9 @@ struct MacShellView: View {
             }
         }
         .listStyle(.sidebar)
+        // A DM row moving from the DM section into the pinned section leaves a stale
+        // copy drawn over the first channel. A fresh list per section has nothing to move.
+        .id(ui.section)
     }
 
     private var pinnedDMs: [DMSummary] {

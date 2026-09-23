@@ -48,6 +48,14 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.bwees.zulu
             CFBundleURLSchemes: [zulip]
+        ZuluNotificationServiceURL: https://zulu-notify.bwees.io
+    entitlements:
+      path: Zulu.entitlements
+      properties:
+        # Shared with the Mac app, so both read the same groups and channel settings.
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.bwees.zulu
+        # Export for the App Store rewrites this to production.
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu
@@ -55,8 +63,8 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         TARGETED_DEVICE_FAMILY: "1,2"
-        # Bumped by hand when we decide a release is worth a new number.
-        MARKETING_VERSION: "1.0"
+        # release-please bumps this in its release PR.
+        MARKETING_VERSION: "1.0.0" # x-release-please-version
         # Placeholder only. The release workflow overrides this on the xcodebuild
         # command line with the commit count, so the checked-in value never reaches
         # App Store Connect.
@@ -104,16 +112,17 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.files.user-selected.read-only: true
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.bwees.zulu
     settings:
       base:
+        PRODUCT_NAME: Zulu
         PRODUCT_BUNDLE_IDENTIFIER: com.bwees.zulu
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "1.0.0" # x-release-please-version
         CURRENT_PROJECT_VERSION: "1"
-        # The team only chooses the signing identity here. Nothing in the entitlements
-        # needs a provisioning profile, so the Mac build gets no keychain access group
-        # and SecretStore goes on writing to the sandbox container.
+        # The iCloud entitlement needs a provisioning profile, which the team provides.
+        # A secret already written to the sandbox container is still read back from it.
         DEVELOPMENT_TEAM: 65AMD2STXG
         CODE_SIGN_STYLE: Automatic

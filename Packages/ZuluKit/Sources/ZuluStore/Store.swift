@@ -265,6 +265,7 @@ public final class ZuluStore: Sendable {
     public func clearAll() throws {
         try writer.write { db in
             for table in [
+                "promotedTopic", "channelGroupMember", "channelGroup",
                 "submessage", "reaction", "message", "topic", "channel", "user", "syncState", "unread",
                 "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber",
             ] {

@@ -1,9 +1,15 @@
 # Releasing Zulu
 
-Every push to `main` runs `.github/workflows/release.yml`, which tests ZuluKit,
-archives the app, exports a signed `.ipa`, and uploads it to TestFlight. Nothing
-below happens automatically — this is the one-time setup a human has to do first,
-in this order.
+Releases are cut by release-please. Every push to `main` updates one release PR per
+component, built from conventional commits:
+
+| Component | Paths | Tag | Merging its release PR runs |
+| --- | --- | --- | --- |
+| `zulu` | everything but `service/` | `zulu-v1.2.3` | `release.yml`: tests ZuluKit, archives, uploads to TestFlight |
+| `notifyd` | `service/` | `notifyd-v0.1.0` | `notifyd-release.yml`: pushes `ghcr.io/bwees/zulu-notifyd:v0.1.0` |
+
+`release.yml` can also be run by hand from the Actions tab. Nothing below happens
+automatically — this is the one-time setup a human has to do first, in this order.
 
 Team: **Brandon Wees, `65AMD2STXG`** (not FUTO Holdings). Bundle id: `com.bwees.zulu`.
 
@@ -102,12 +108,12 @@ minutes of the upload finishing processing.
 
 | | Where | Who changes it |
 | --- | --- | --- |
-| `CFBundleShortVersionString` | `MARKETING_VERSION` in `App/project.yml` | you, by hand |
+| `CFBundleShortVersionString` | `MARKETING_VERSION` in `App/project.yml` | release-please, in the release PR |
 | `CFBundleVersion` | `git rev-list --count HEAD` | the workflow, per run |
 
-Marketing version is a product decision, so it is a reviewable line in the repo. Bump
-it in `project.yml` when a release deserves a new number; App Store Connect is happy
-to take many builds under one marketing version.
+Marketing version follows the commits: `fix:` bumps the patch, `feat:` the minor, and
+`!` or `BREAKING CHANGE:` the major. release-please finds the line by its
+`x-release-please-version` comment, so keep that comment on it.
 
 Build number has one hard requirement: App Store Connect rejects a build whose
 `CFBundleVersion` it has already seen for the same marketing version. Commit count

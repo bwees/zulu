@@ -35,5 +35,6 @@ let package = Package(
         .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore", "ZulipAPI", "ZuluEmoji"]),
         .testTarget(name: "ZuluMarkupTests", dependencies: ["ZuluMarkup"]),
         .testTarget(name: "ZuluPollsTests", dependencies: ["ZuluPolls"]),
+        .testTarget(name: "ZuluSyncTests", dependencies: ["ZuluSync", "ZuluStore"]),
     ]
 )

@@ -3,12 +3,24 @@ import SwiftUI
 @main
 struct ZuluApp: App {
     @State private var model = AppModel()
+    @UIApplicationDelegateAdaptor private var push: PushNotifications
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
-                .task { await model.bootstrap() }
+                .task {
+                    push.attach(model: model)
+                    await model.bootstrap()
+                }
+                .task(id: model.phase) {
+                    if model.phase == .signedIn { await push.enable() }
+                }
+                .onChange(of: model.destination) { Task { await push.clearDelivered() } }
+                .onChange(of: scenePhase) {
+                    if scenePhase == .active { Task { await push.clearDelivered() } }
+                }
         }
     }
 }

@@ -64,3 +64,23 @@ change notifications for free, which is enough for a single person editing their
 Still blocked on the same thing: **iCloud of any kind needs an entitlement, which needs a
 Development Team on the target.** The project has none. When one exists, this is a small
 piece of work rather than a large one.
+
+## Answer — sync built
+
+The Development Team exists now, so the blocker is gone.
+
+- **One document per realm** in `NSUbiquitousKeyValueStore`, keyed by the realm URL, since
+  channel ids mean nothing on another server. It carries groups, filing, channel aliases,
+  modes, hiding, sidebar order, and promoted topics. Icons stay on the device.
+- **Last writer wins** on the whole document.
+- **A device only speaks for channels it holds.** Settings for a channel it is not
+  subscribed to are passed along untouched, and filled in once that channel arrives.
+- **A fresh device writes nothing** until it has something of its own, so it cannot erase
+  the document iCloud is still downloading.
+- **Signed out of iCloud** keeps working: key-value storage holds a local copy.
+- **Signing out of Zulip clears groups locally.** They come back from iCloud on sign-in to
+  the same realm; a different realm starts from its own document. Icons do not come back.
+- iOS and Mac share one store identifier, so both apps see the same arrangement.
+
+Eleven tests: the document round-trip and carry-over in `ZuluStoreTests`, and two devices
+syncing through a fake iCloud in `ZuluSyncTests`. Not yet checked across two real devices.

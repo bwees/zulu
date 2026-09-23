@@ -42,8 +42,9 @@ cd App && xcodegen generate && open Zulu.xcodeproj
 Pick the `Zulu` scheme for iOS or `ZuluMac` for the Mac. Then sign in with your Zulip organization's address. Password and SSO both work; SSO opens
 a browser and comes back through the `zulip://` callback the server hardcodes.
 
-Releases to TestFlight happen on every push to `main` — see
-[`docs/RELEASING.md`](docs/RELEASING.md) for the one-time Apple setup that requires.
+release-please cuts releases for the app (to TestFlight) and the notification service
+(to GHCR) separately. See [`docs/RELEASING.md`](docs/RELEASING.md) for how that works
+and the one-time Apple setup it needs.
 
 The nav-shell prototype still runs on its own:
 

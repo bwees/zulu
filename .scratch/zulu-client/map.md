@@ -71,7 +71,7 @@ is worth notifying about.
 ## Shortcuts taken, to be paid back
 
 - **Message rendering uses the system HTML importer.** `MessageContent` converts Zulip's `rendered_content` with `NSAttributedString`'s HTML document type. It is slow, main-thread-only, and drops Zulip-specific structure — spoilers, code-block languages, mention chips. The research settled that a native parse of the server HTML into a view tree is what the client needs; this is a stopgap so messages are readable now.
-- **Channel groups are not implemented.** The rail has two entries, Channels and DMs, rather than user-defined groups. The group model and its iCloud sync are still [Channel groups and iCloud sync](issues/10-channel-groups-icloud-sync.md).
+- **Channel groups sync through iCloud key-value storage.** See [Channel groups and iCloud sync](issues/10-channel-groups-icloud-sync.md).
 - **Forum-vs-chat detection is a placeholder.** A channel renders as a forum when it has more than one topic. [Forum-vs-chat auto-detection](issues/09-channel-mode-detection.md) is where the real rule gets decided.
 - **No local echo on send.** A sent message appears when the event queue returns it. `queue_id` + `local_id` exist for optimistic echo and are unused.
 - **Topics are fetched per channel in a loop** after each register, because there is no bulk endpoint. Fine at small channel counts, rude at large ones.

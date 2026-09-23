@@ -56,6 +56,7 @@ final class AppModel {
     fileprivate var store: ZuluStore?
     fileprivate var client: ZulipClient?
     private var sync: SyncEngine?
+    private var shapeSync: PersonalShapeSync?
     fileprivate var observers: [AnyDatabaseCancellable] = []
 
     // MARK: lifecycle
@@ -80,6 +81,12 @@ final class AppModel {
             self.client = client
             RealmContext.realmURL = account.realmURL
             self.sync = sync
+
+            let shapeSync = PersonalShapeSync(
+                store: store, cloud: UbiquitousDocumentStore(), realmURL: account.realmURL
+            )
+            shapeSync.start()
+            self.shapeSync = shapeSync
 
             observe(store)
             startSidebarObservations()
@@ -178,6 +185,8 @@ final class AppModel {
 
     func signOut() async {
         await sync?.stop()
+        shapeSync?.stop()
+        shapeSync = nil
         observers.removeAll()
         try? store?.clearAll()
         AccountStorage.clear()
@@ -714,20 +723,11 @@ extension AppModel {
     /// Reopening on the conversation you left is the difference between a chat app and a
     /// filing cabinet. Stored in defaults rather than the database because it is about this
     /// device's last session, not about the account.
+    /// Clearing the destination keeps the last one stored: an empty detail column is a
+    /// pause, not somewhere to come back to.
     func rememberDestination() {
-        guard let destination else {
-            UserDefaults.standard.removeObject(forKey: Self.lastDestinationKey)
-            return
-        }
-        let encoded: [String: String] = switch destination {
-        case .channel(let id):
-            ["kind": "channel", "channel": String(id)]
-        case .dm(let key):
-            ["kind": "dm", "key": key]
-        case .topic(let channelID, let name, let channelName):
-            ["kind": "topic", "channel": String(channelID), "name": name, "channelName": channelName]
-        }
-        UserDefaults.standard.set(encoded, forKey: Self.lastDestinationKey)
+        guard let destination else { return }
+        UserDefaults.standard.set(destination.encoded, forKey: Self.lastDestinationKey)
     }
 
     func restoreDestination() {
@@ -735,19 +735,37 @@ extension AppModel {
               let stored = UserDefaults.standard.dictionary(forKey: Self.lastDestinationKey)
                 as? [String: String]
         else { return }
+        destination = Destination(encoded: stored)
+    }
+}
 
-        switch stored["kind"] {
+extension AppModel.Destination {
+    var encoded: [String: String] {
+        switch self {
+        case .channel(let id):
+            ["kind": "channel", "channel": String(id)]
+        case .dm(let key):
+            ["kind": "dm", "key": key]
+        case .topic(let channelID, let name, let channelName):
+            ["kind": "topic", "channel": String(channelID), "name": name, "channelName": channelName]
+        }
+    }
+
+    init?(encoded: [String: String]) {
+        switch encoded["kind"] {
         case "channel":
-            if let id = stored["channel"].flatMap(Int.init) { destination = .channel(id) }
+            guard let id = encoded["channel"].flatMap(Int.init) else { return nil }
+            self = .channel(id)
         case "dm":
-            if let key = stored["key"] { destination = .dm(key) }
+            guard let key = encoded["key"] else { return nil }
+            self = .dm(key)
         case "topic":
-            if let id = stored["channel"].flatMap(Int.init),
-               let name = stored["name"], let channelName = stored["channelName"] {
-                destination = .topic(channelID: id, name: name, channelName: channelName)
-            }
+            guard let id = encoded["channel"].flatMap(Int.init),
+                  let name = encoded["name"], let channelName = encoded["channelName"]
+            else { return nil }
+            self = .topic(channelID: id, name: name, channelName: channelName)
         default:
-            break
+            return nil
         }
     }
 }

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "896f8b6df4b335299c0c582ed8e47d18588fda8b",
+  "include-component-in-tag": true,
+  "separate-pull-requests": true,
+  "packages": {
+    ".": {
+      "component": "zulu",
+      "release-type": "simple",
+      "exclude-paths": ["service"],
+      "extra-files": [{ "type": "generic", "path": "App/project.yml" }]
+    },
+    "service": {
+      "component": "notifyd",
+      "release-type": "go"
+    }
+  }
+}

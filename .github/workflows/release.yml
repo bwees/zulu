@@ -1,13 +1,14 @@
-name: Release
+name: App release
 
+# release-please.yml calls this when it cuts a Zulu release.
 on:
-  push:
-    branches: [main]
+  workflow_call:
+  workflow_dispatch:
 
 # Two uploads racing would fight over the same build number, so releases queue
 # rather than cancel each other.
 concurrency:
-  group: release
+  group: app-release
   cancel-in-progress: false
 
 env:

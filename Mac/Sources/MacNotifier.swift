@@ -47,7 +47,7 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
 
         // Already reading it: a banner would only repeat what is on screen.
-        if NSApp.isActive, isOpen(destination, in: model) { return }
+        if NSApp.isActive, model.isShowing(destination) { return }
 
         let content = UNMutableNotificationContent()
         content.title = message.sender_full_name
@@ -61,18 +61,6 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
             identifier: "zulu-message-\(message.id)", content: content, trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
-    }
-
-    /// A chat channel shows its one topic under the channel's own destination, so a
-    /// message there counts as open when the channel is.
-    private func isOpen(_ destination: AppModel.Destination, in model: AppModel) -> Bool {
-        if model.destination == destination { return true }
-        if case .topic(let channelID, _, _) = destination,
-           case .channel(let openID) = model.destination, openID == channelID,
-           model.channel(channelID)?.rendersAsForum == false {
-            return true
-        }
-        return false
     }
 
     // MARK: delegate
