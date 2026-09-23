@@ -8,7 +8,7 @@ struct PollReplayTests {
 
     private static let author = 58
 
-    private func poll(_ events: [PollSubmessage]) -> Poll? {
+    private func replay(_ events: [PollSubmessage]) -> Poll? {
         let log = [PollSubmessage(id: 1, senderID: Self.author, content: Self.definition)] + events
         return MessageWidget(submessages: log)?.poll
     }
@@ -18,7 +18,7 @@ struct PollReplayTests {
     }
 
     @Test func definitionSeedsCannedOptions() throws {
-        let poll = try #require(poll([]))
+        let poll = try #require(replay([]))
         #expect(poll.question == "What did you drink this morning?")
         #expect(poll.options.map(\.key) == ["canned,0", "canned,1"])
         #expect(poll.options.map(\.text) == ["Milk", "Tea"])
@@ -34,7 +34,7 @@ struct PollReplayTests {
     }
 
     @Test func voteThenUnvoteLeavesNoVoter() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
             PollSubmessage(id: 3, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":-1}"#),
         ]))
@@ -42,7 +42,7 @@ struct PollReplayTests {
     }
 
     @Test func aVoterMayPickSeveralOptions() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
             PollSubmessage(id: 3, senderID: 7, content: #"{"type":"vote","key":"canned,1","vote":1}"#),
             PollSubmessage(id: 4, senderID: 9, content: #"{"type":"vote","key":"canned,1","vote":1}"#),
@@ -54,7 +54,7 @@ struct PollReplayTests {
     /// Votes are a set keyed by voter, so the same vote twice changes nothing and a
     /// retraction of a vote never cast is not an error.
     @Test func repeatedAndUnmatchedVotesAreHarmless() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
             PollSubmessage(id: 3, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
             PollSubmessage(id: 4, senderID: 9, content: #"{"type":"vote","key":"canned,0","vote":-1}"#),
@@ -63,7 +63,7 @@ struct PollReplayTests {
     }
 
     @Test func newOptionTakesTheSenderAndIndexAsItsKey() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"new_option","idx":1,"option":"Coffee"}"#),
         ]))
         #expect(poll.options.map(\.key) == ["canned,0", "canned,1", "7,1"])
@@ -71,7 +71,7 @@ struct PollReplayTests {
     }
 
     @Test func duplicateOptionTextIsDropped() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"new_option","idx":1,"option":"Tea"}"#),
         ]))
         #expect(poll.options.count == 2)
@@ -87,7 +87,7 @@ struct PollReplayTests {
 
     /// Events append out of band, so the array reaching replay is not reliably sorted.
     @Test func idOrderDecidesTheOutcomeNotArrayOrder() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 4, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
             PollSubmessage(id: 3, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":-1}"#),
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
@@ -105,7 +105,7 @@ struct PollReplayTests {
     }
 
     @Test func malformedContentIsSkippedRatherThanFatal() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: "not json at all"),
             PollSubmessage(id: 3, senderID: 7, content: #"{"type":"vote"}"#),
             PollSubmessage(id: 4, senderID: 7, content: "{"),
@@ -119,7 +119,7 @@ struct PollReplayTests {
     }
 
     @Test func unknownEventTypesAreIgnored() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"retract_everything"}"#),
             PollSubmessage(id: 3, senderID: 7, content: #"{"type":"vote","key":"canned,0","vote":1}"#),
         ]))
@@ -127,14 +127,14 @@ struct PollReplayTests {
     }
 
     @Test func aVoteForAnUnknownKeyIsDropped() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"vote","key":"99,4","vote":1}"#),
         ]))
         #expect(poll.options.allSatisfy { $0.voterIDs.isEmpty })
     }
 
     @Test func onlyTheMessageSenderMayChangeTheQuestion() throws {
-        let poll = try #require(poll([
+        let poll = try #require(replay([
             PollSubmessage(id: 2, senderID: 7, content: #"{"type":"question","question":"hijacked"}"#),
             PollSubmessage(id: 3, senderID: Self.author, content: #"{"type":"question","question":"RIGHT NOW?"}"#),
         ]))
