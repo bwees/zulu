@@ -5,8 +5,9 @@ import ZuluStore
 /// What the detail column shows for the selected destination.
 ///
 /// A chat channel is not a conversation yet — which topic it means depends on what is in
-/// it — so it stays a channel until something resolves it. A forum channel is its topic
-/// list. Everything else is one conversation.
+/// it — so it stays a channel until something resolves it. A forum channel as a
+/// destination is its topic page; its sidebar row opens general chat instead, so the page
+/// is reached deliberately. Everything else is one conversation.
 struct MacDetailView: View {
     @Environment(AppModel.self) private var model
 

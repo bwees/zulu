@@ -193,7 +193,7 @@ struct MacQuickSwitcher: View {
                 userID: nil,
                 unread: channel.unreadCount,
                 mentions: channel.mentionCount,
-                destination: .channel(channel.id),
+                destination: channel.rendersAsForum ? model.generalChat(in: channel) : .channel(channel.id),
                 kind: 0,
                 aliases: real.map { [$0] } ?? []
             ))

@@ -202,6 +202,9 @@ struct MacShellView: View {
         )
     }
 
+    /// A forum's row opens its general chat — the conversation people mean when they
+    /// say the channel's name — not a list to pick from first. The topic page is one
+    /// click further: the "All topics" row underneath, or the toolbar of any topic in it.
     @ViewBuilder
     private func channelRow(_ channel: ChannelSummary) -> some View {
         if channel.rendersAsForum {
@@ -216,7 +219,7 @@ struct MacShellView: View {
                     mentions: channel.mentionCount
                 )
             }
-            .tag(AppModel.Destination.channel(channel.id))
+            .tag(model.generalChat(in: channel))
             .contextMenu { channelMenu(channel) }
         } else {
             MacSidebarRow(
@@ -236,6 +239,7 @@ struct MacShellView: View {
         Button("Mark as Read") { Task { await model.markChannelRead(channel.id) } }
             .disabled(channel.unreadCount == 0)
         if channel.rendersAsForum {
+            Button("All Topics") { model.destination = .channel(channel.id) }
             Button("New Topic…") { ui.newTopicChannel = ChannelSummaryBox(channel: channel) }
         }
         Divider()
@@ -498,7 +502,9 @@ private struct MacTopicRows: View {
                     .foregroundStyle(.secondary)
                     .selectionDisabled()
             } else {
-                ForEach(topics.prefix(Self.shown)) { topic in
+                // The channel's own row is general chat, so it is not listed again here.
+                let generalChat = model.generalChatTopic(inChannel: channel.id)
+                ForEach(topics.filter { $0.name != generalChat }.prefix(Self.shown)) { topic in
                     MacSidebarRow(
                         title: topic.name.isEmpty ? "general chat" : topic.name,
                         unread: topic.unreadCount

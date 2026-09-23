@@ -589,6 +589,19 @@ extension AppModel {
 }
 
 extension AppModel {
+    /// The conversation a forum channel's name refers to. The unnamed topic where the
+    /// server has one, otherwise the topic literally called "general chat", which is
+    /// both what older servers send and what a new one is created as.
+    func generalChatTopic(inChannel id: Int) -> String {
+        (try? store?.generalChatTopicName(inChannel: id)) ?? "general chat"
+    }
+
+    func generalChat(in channel: ChannelSummary) -> Destination {
+        .topic(channelID: channel.id, name: generalChatTopic(inChannel: channel.id), channelName: channel.name)
+    }
+}
+
+extension AppModel {
     /// True once the store exists, so views that observe it know when to start.
     var isReady: Bool { store != nil }
 }

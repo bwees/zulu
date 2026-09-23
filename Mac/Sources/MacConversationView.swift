@@ -46,6 +46,14 @@ struct MacConversationView: View {
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             if let forum = forumChannel {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        model.destination = .channel(forum.id)
+                    } label: {
+                        Label("All Topics", systemImage: "list.bullet")
+                    }
+                    .help("All topics in #\(forum.name)")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         ui.newTopicChannel = ChannelSummaryBox(channel: forum)

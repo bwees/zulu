@@ -26,10 +26,17 @@ Settled with it:
   phone's order, drawn narrower, with ⌘1/⌘2 and ⌘3–⌘9 mapped down it the way Slack numbers
   workspaces. Putting groups in a sidebar section instead would have cost the persistent
   unread pill per group, which is the whole reason the rail exists.
-- **Forum topics nest in the sidebar** under a disclosure triangle — the most recent eight,
-  then an "All N topics…" row that opens the channel's own page. Selecting the forum row
-  itself opens that page: every topic, who spoke last and when, a filter field, and a New
-  Topic button. A chat channel opens straight into its one conversation.
+- **A forum's row opens its general chat.** Clicking a channel's name means "take me to the
+  channel", and the conversation people mean by that is general chat — the unnamed topic on
+  a server that has one, or the topic literally called `general chat`, which is what a
+  server sends to a client that has not opted into the empty name. The store answers which
+  one this channel has; guessing the empty name opened a blank conversation beside the real
+  one. Its topics
+  nest under a disclosure triangle — the most recent eight, then an "All N topics…" row that
+  opens the channel's own page: every topic, who spoke last and when, a filter field, and a
+  New Topic button. The page is also behind an All Topics button in the toolbar of any
+  topic in the channel and in the row's context menu. A chat channel opens straight into
+  its one conversation.
 - **Selection is the model's destination**, shared with iOS and remembered across launches.
   The rail follows it: opening something from ⌘K or a notification switches the sidebar to
   the group that holds it.

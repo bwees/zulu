@@ -207,6 +207,22 @@ extension ZuluStore {
 }
 
 extension ZuluStore {
+    /// The topic a channel's "general chat" lives in, as this server spells it.
+    ///
+    /// Newer servers use the empty name and let clients label it; older ones, and any
+    /// server talking to a client that has not opted into the empty name, send the label
+    /// itself as the topic. Whichever exists here is the one to open.
+    public func generalChatTopicName(inChannel id: Int) throws -> String? {
+        try writer.read { db in
+            try String.fetchOne(db, sql: """
+                SELECT name FROM topic
+                 WHERE channelID = ? AND name IN ('', 'general chat', '(no topic)')
+                 ORDER BY CASE name WHEN '' THEN 0 WHEN 'general chat' THEN 1 ELSE 2 END
+                 LIMIT 1
+                """, arguments: [id])
+        }
+    }
+
     /// The most recently active topics across every channel, so the sidebar can show a
     /// channel's live conversations without a query per channel.
     public func observeRecentTopics(perChannel limit: Int = 3)
