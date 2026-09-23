@@ -38,6 +38,16 @@ public actor SyncEngine {
         handler(status)
     }
 
+    private var arrivalHandler: (@Sendable (ZulipMessage) -> Void)?
+
+    /// Called for each message the event queue delivers, once it is in the store.
+    ///
+    /// Only the live queue passes through here. The register snapshot and history
+    /// backfills are the past, and a notification is about now.
+    public func onMessageArrival(_ handler: @escaping @Sendable (ZulipMessage) -> Void) {
+        arrivalHandler = handler
+    }
+
     private func setStatus(_ new: SyncStatus) {
         guard status != new else { return }
         status = new
@@ -62,12 +72,15 @@ public actor SyncEngine {
                 guard let queueID else { continue }
 
                 let batch = try await client.events(queueID: queueID, lastEventID: lastEventID)
-                try await apply(batch.events)
+                let failure = await apply(batch.events)
                 lastEventID = max(lastEventID, batch.lastEventID)
                 try store.saveSyncState(queueID: queueID, lastEventID: lastEventID)
 
                 backoffStep = 0
-                setStatus(.live)
+                // One event the store refuses must not stop the queue: the batch is
+                // acknowledged either way, and the refusal is shown until the next batch
+                // goes through cleanly.
+                setStatus(failure.map { .failed($0.localizedDescription) } ?? .live)
             } catch let error as ZulipError where error.code == "BAD_EVENT_QUEUE_ID" {
                 // The queue expired. There is no partial resync: re-register and refetch.
                 queueID = nil
@@ -136,48 +149,60 @@ public actor SyncEngine {
         }
     }
 
-    private func apply(_ events: [ZulipEvent]) async throws {
+    /// Applies every event, and reports the first error rather than stopping at it.
+    private func apply(_ events: [ZulipEvent]) async -> Error? {
+        var failure: Error?
         for event in events {
-            switch event {
-            case .message(let message):
-                try store.save(messages: [message], selfUserID: selfUserID)
-                try store.noteArrival(of: message, selfUserID: selfUserID)
-
-            case .deleteMessage(let ids):
-                try store.deleteMessages(ids: ids)
-
-            case .flags(let operation, let flag, let messageIDs) where flag == "read":
-                try store.setRead(ids: messageIDs, read: operation == "add")
-                if operation == "add" { try store.clearUnread(ids: messageIDs) }
-
-            case .updateMessage(let id, let renderedContent):
-                if let renderedContent {
-                    try store.updateRenderedContent(id: id, html: renderedContent)
-                }
-
-            case .reaction(let added, let messageID, let reaction):
-                try store.setReaction(reaction, onMessage: messageID, added: added)
-
-            case .submessage(let submessage):
-                try store.apply(submessage)
-
-            case .subscriptionsChanged:
-                if let subscriptions = try? await client.subscriptions() {
-                    try store.replaceChannels(subscriptions)
-                    try store.replaceSubscribers(subscriptions)
-                }
-
-            case .realmEmojiChanged(let emoji):
-                try store.replaceRealmEmoji(emoji)
-
-            case .userGroupsChanged:
-                if let groups = try? await client.userGroups() {
-                    try store.replaceUserGroups(groups, selfUserID: selfUserID)
-                }
-
-            case .flags, .heartbeat, .other:
-                break
+            do {
+                try await apply(event)
+            } catch {
+                failure = failure ?? error
             }
+        }
+        return failure
+    }
+
+    private func apply(_ event: ZulipEvent) async throws {
+        switch event {
+        case .message(let message):
+            try store.save(messages: [message], selfUserID: selfUserID)
+            try store.noteArrival(of: message, selfUserID: selfUserID)
+            arrivalHandler?(message)
+
+        case .deleteMessage(let ids):
+            try store.deleteMessages(ids: ids)
+
+        case .flags(let operation, let flag, let messageIDs) where flag == "read":
+            try store.setRead(ids: messageIDs, read: operation == "add")
+            if operation == "add" { try store.clearUnread(ids: messageIDs) }
+
+        case .updateMessage(let id, let renderedContent):
+            if let renderedContent {
+                try store.updateRenderedContent(id: id, html: renderedContent)
+            }
+
+        case .reaction(let added, let messageID, let reaction):
+            try store.setReaction(reaction, onMessage: messageID, added: added)
+
+        case .submessage(let submessage):
+            try store.apply(submessage)
+
+        case .subscriptionsChanged:
+            if let subscriptions = try? await client.subscriptions() {
+                try store.replaceChannels(subscriptions)
+                try store.replaceSubscribers(subscriptions)
+            }
+
+        case .realmEmojiChanged(let emoji):
+            try store.replaceRealmEmoji(emoji)
+
+        case .userGroupsChanged:
+            if let groups = try? await client.userGroups() {
+                try store.replaceUserGroups(groups, selfUserID: selfUserID)
+            }
+
+        case .flags, .heartbeat, .other:
+            break
         }
     }
 }

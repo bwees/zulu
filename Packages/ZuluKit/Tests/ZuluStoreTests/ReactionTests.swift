@@ -134,6 +134,23 @@ struct ReactionStoreTests {
         return store
     }
 
+    /// The server sends a reaction event for every message in every subscribed channel,
+    /// fetched or not. One for a message this client does not hold used to fail the
+    /// foreign key — and, since a batch is only acknowledged once it applies, stop the
+    /// event queue on that batch for good.
+    @Test func aReactionOnAMessageWeDoNotHoldIsDropped() throws {
+        let store = try store()
+        let reaction = try JSONDecoder().decode(Reaction.self, from: Data(
+            #"{"emoji_name":"heart","emoji_code":"2764","reaction_type":"unicode_emoji","user_id":9}"#.utf8
+        ))
+
+        try store.setReaction(reaction, onMessage: 999, added: true)
+        #expect(try store.reactions(forMessage: 999).isEmpty)
+
+        try store.setReaction(reaction, onMessage: 1, added: true)
+        #expect(try store.reactions(forMessage: 1).count == 1)
+    }
+
     @Test func groupsComeBackInTheOrderTheReactionsWereWritten() throws {
         let store = try store()
         for row in [

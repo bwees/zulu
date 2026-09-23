@@ -183,8 +183,15 @@ extension ZuluStore {
         }
     }
 
+    /// Applies one `reaction` event.
+    ///
+    /// The server sends these for every message in every subscribed channel, fetched or
+    /// not. One for a message this client does not hold is dropped: the reactions arrive
+    /// with the message itself when it is fetched, and a row pointing at nothing would
+    /// fail the foreign key and wedge the event queue on that batch.
     public func setReaction(_ reaction: Reaction, onMessage id: Int, added: Bool) throws {
         try writer.write { db in
+            guard try MessageRecord.exists(db, key: id) else { return }
             if added {
                 try ReactionRecord(messageID: id, reaction: reaction).save(db)
             } else {
