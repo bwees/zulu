@@ -67,6 +67,13 @@ type StatusResponse struct {
 	LastError   string    `json:"lastError,omitempty"`
 }
 
+// TestNotificationResponse is what APNs answered for the test push.
+type TestNotificationResponse struct {
+	Sent       bool   `json:"sent"`
+	StatusCode int    `json:"statusCode"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 type HealthResponse struct {
 	Status string `json:"status"`
 }

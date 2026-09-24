@@ -134,8 +134,9 @@ API serves streams, so default timeouts are fine.
 
 ## 7. Register a device
 
-The app does this for you once it knows the service's URL. To check the service
-by hand:
+The app does this for you once you enter the service's URL under **… →
+Notifications**. That page also shows the status below and sends a test push.
+To check the service by hand:
 
 ```sh
 curl -s https://notify.example.com/v1/devices \
@@ -168,6 +169,7 @@ curl -s https://notify.example.com/v1/status -H "authorization: Bearer $SECRET"
 | `GET /v1/devices` | device secret | The account's registered devices. |
 | `DELETE /v1/devices/{deviceId}` | device secret | Deregister. Removing the last device deletes the stored API key. |
 | `GET /v1/status` | device secret | Queue health, last event, last error. |
+| `POST /v1/test-notification` | device secret | Push a test notification to the calling device. Returns the APNs status and reason. |
 | `GET /healthz` | none | Liveness. |
 
 ## 8. Verify a push end to end

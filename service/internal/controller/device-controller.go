@@ -104,6 +104,23 @@ func (c *DeviceController) Status(ctx fuego.ContextNoBody) (StatusResponse, erro
 	}, nil
 }
 
+func (c *DeviceController) SendTest(ctx fuego.ContextNoBody) (TestNotificationResponse, error) {
+	caller, err := c.authenticate(ctx)
+	if err != nil {
+		return TestNotificationResponse{}, err
+	}
+
+	receipt, err := c.devices.SendTest(ctx.Context(), caller)
+	if err != nil {
+		return TestNotificationResponse{}, httpError(err)
+	}
+	return TestNotificationResponse{
+		Sent:       receipt.Sent,
+		StatusCode: receipt.StatusCode,
+		Reason:     receipt.Reason,
+	}, nil
+}
+
 func (c *DeviceController) authenticate(ctx fuego.ContextNoBody) (service.Caller, error) {
 	header := ctx.Header("Authorization")
 	if !strings.HasPrefix(header, bearerPrefix) {

@@ -83,6 +83,14 @@ func NewServer(
 		fuego.OptionAddError(http.StatusUnauthorized, "Unknown device secret"),
 	)
 
+	fuego.Post(server, "/v1/test-notification", devices.SendTest,
+		fuego.OptionTags("devices"),
+		fuego.OptionSummary("Send a test notification to the calling device"),
+		fuego.OptionDescription("Returns the APNs answer, so a rejected token or wrong environment shows up in the app."),
+		authenticated,
+		fuego.OptionAddError(http.StatusUnauthorized, "Unknown device secret"),
+	)
+
 	fuego.Get(server, "/healthz", health.Health,
 		fuego.OptionTags("health"),
 		fuego.OptionSummary("Liveness probe"),

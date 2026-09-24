@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bwees/zulu/service/internal/apns"
 	"github.com/bwees/zulu/service/internal/domain"
 	"github.com/bwees/zulu/service/internal/repository"
 	"github.com/bwees/zulu/service/internal/zulip"
@@ -30,12 +31,20 @@ type Supervisor interface {
 	Health(userID int64) domain.WorkerHealth
 }
 
+const (
+	testNotificationTitle = "Zulu"
+	testNotificationBody  = "Notifications are working."
+	// testCollapseID replaces the previous test notification instead of stacking.
+	testCollapseID = "zulu-test"
+)
+
 // DeviceService owns registration, listing, and deregistration of the devices a
 // user wants notified.
 type DeviceService struct {
 	users      *repository.UserRepository
 	devices    *repository.DeviceRepository
 	zulip      *zulip.Client
+	sender     apns.Sender
 	supervisor Supervisor
 	log        *slog.Logger
 }
@@ -44,6 +53,7 @@ func NewDeviceService(
 	users *repository.UserRepository,
 	devices *repository.DeviceRepository,
 	zulipClient *zulip.Client,
+	sender apns.Sender,
 	supervisor Supervisor,
 	log *slog.Logger,
 ) *DeviceService {
@@ -51,6 +61,7 @@ func NewDeviceService(
 		users:      users,
 		devices:    devices,
 		zulip:      zulipClient,
+		sender:     sender,
 		supervisor: supervisor,
 		log:        log,
 	}
@@ -237,6 +248,31 @@ func (s *DeviceService) Status(ctx context.Context, userID int64) (Status, error
 		return Status{}, err
 	}
 	return Status{User: user, Devices: len(devices), Health: s.supervisor.Health(userID)}, nil
+}
+
+// SendTest pushes a fixed notification to the calling device only. The receipt
+// is returned as-is so the app can show why APNs refused it.
+func (s *DeviceService) SendTest(ctx context.Context, caller Caller) (apns.Receipt, error) {
+	receipt, err := s.sender.Push(ctx, apns.Notification{
+		Token:       caller.Device.Token,
+		Environment: caller.Device.Environment,
+		CollapseID:  testCollapseID,
+		Payload: apns.Payload{
+			Title:             testNotificationTitle,
+			Body:              testNotificationBody,
+			Sound:             "default",
+			InterruptionLevel: "active",
+			Custom:            map[string]any{"realmUrl": caller.User.RealmURL},
+		},
+	})
+	if err != nil {
+		return apns.Receipt{}, err
+	}
+	s.log.Info("test notification",
+		"device_id", caller.Device.ID,
+		"status", receipt.StatusCode,
+		"reason", receipt.Reason)
+	return receipt, nil
 }
 
 func validateRegisterInput(input RegisterInput) error {

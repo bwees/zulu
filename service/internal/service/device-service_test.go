@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/bwees/zulu/service/internal/apns"
 	"github.com/bwees/zulu/service/internal/database"
 	"github.com/bwees/zulu/service/internal/domain"
 	"github.com/bwees/zulu/service/internal/repository"
@@ -67,6 +68,7 @@ func fakeZulip(t *testing.T, body string, status int) *httptest.Server {
 
 type deviceFixture struct {
 	devices    *service.DeviceService
+	sender     *recordingSender
 	supervisor *fakeSupervisor
 	realmURL   string
 }
@@ -74,15 +76,18 @@ type deviceFixture struct {
 func newDeviceFixture(t *testing.T, zulipServer *httptest.Server) deviceFixture {
 	t.Helper()
 	db := newTestDatabase(t)
+	sender := &recordingSender{}
 	supervisor := &fakeSupervisor{}
 	return deviceFixture{
 		devices: service.NewDeviceService(
 			repository.NewUserRepository(db, newTestSealer(t)),
 			repository.NewDeviceRepository(db),
 			zulip.NewClient(),
+			sender,
 			supervisor,
 			newTestLogger(),
 		),
+		sender:     sender,
 		supervisor: supervisor,
 		realmURL:   zulipServer.URL,
 	}
@@ -114,6 +119,28 @@ func TestRegisterStartsWatchingTheAccount(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, output.DeviceID, caller.Device.ID)
 	assert.Equal(t, "canonical@example.com", caller.User.Email, "Zulip's delivery email wins over what the app sent")
+}
+
+func TestSendTestPushesOnlyToTheCallingDevice(t *testing.T) {
+	fixture := newDeviceFixture(t, fakeZulip(t, `{"user_id": 12, "email": "user@example.com"}`, 200))
+	first, err := fixture.devices.Register(context.Background(), fixture.input())
+	require.NoError(t, err)
+	second := fixture.input()
+	second.DeviceToken = "ffee"
+	_, err = fixture.devices.Register(context.Background(), second)
+	require.NoError(t, err)
+
+	caller, err := fixture.devices.Authenticate(context.Background(), first.DeviceSecret)
+	require.NoError(t, err)
+	fixture.sender.receipts = []apns.Receipt{{StatusCode: 400, Reason: apns.ReasonBadDeviceToken}}
+
+	receipt, err := fixture.devices.SendTest(context.Background(), caller)
+
+	require.NoError(t, err)
+	assert.Equal(t, apns.ReasonBadDeviceToken, receipt.Reason)
+	require.Len(t, fixture.sender.sent, 1)
+	assert.Equal(t, "0a1b2c", fixture.sender.sent[0].Token)
+	assert.Equal(t, domain.EnvironmentProduction, fixture.sender.sent[0].Environment)
 }
 
 func TestRegisterRejectsBadInput(t *testing.T) {
