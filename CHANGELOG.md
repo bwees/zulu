@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/slop-place/zulu/compare/zulu-v1.2.0...zulu-v1.2.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **app:** stop swipe-to-reply from blocking conversation scrolling ([b5e0058](https://github.com/slop-place/zulu/commit/b5e00583262570c4ad0bf8754ccf3d00ede647dc))
+
 ## [1.2.0](https://github.com/slop-place/zulu/compare/zulu-v1.1.2...zulu-v1.2.0) (2026-09-24)
 
 
