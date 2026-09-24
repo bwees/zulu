@@ -468,6 +468,20 @@ extension AppModel {
         try? store?.deleteGroup(id: id)
     }
 
+    func reorderGroups(_ ids: [String]) {
+        try? store?.reorderGroups(ids: ids)
+    }
+
+    /// The dragged group takes the target's slot, whichever direction it came from.
+    func moveGroup(_ id: String, onto target: String) {
+        var ids = groups.map(\.id)
+        guard id != target, let from = ids.firstIndex(of: id),
+              let to = ids.firstIndex(of: target) else { return }
+        ids.remove(at: from)
+        ids.insert(id, at: to)
+        reorderGroups(ids)
+    }
+
     func channelIDs(inGroup id: String) -> [Int] {
         (try? store?.channelIDs(inGroup: id)) ?? []
     }

@@ -25,6 +25,7 @@ struct ShellView: View {
     @State private var showingNotifications = false
     @State private var mutedTopicsChannel: ChannelSummary?
     @State private var showingReorder = false
+    @State private var reorderingGroups = false
     @State private var renamingPromoted: PromotedTopicSummary?
     @State private var editingGroup: String?
     @State private var creatingGroup = false
@@ -136,6 +137,10 @@ struct ShellView: View {
                     }
                     .contextMenu {
                         Button("Edit group", systemImage: "pencil") { editingGroup = group.id }
+                        Button("Reorder groups", systemImage: "arrow.up.arrow.down") {
+                            reorderingGroups = true
+                        }
+                        .disabled(model.groups.count < 2)
                         Button("Delete group", systemImage: "trash", role: .destructive) {
                             if section == .group(group.id) { section = .unfiled }
                             model.deleteGroup(id: group.id)
@@ -565,6 +570,7 @@ struct ShellView: View {
         .sheet(isPresented: $showingNotifications) { NotificationSettingsView() }
         .sheet(item: $mutedTopicsChannel) { channel in MutedTopicsView(channel: channel) }
         .sheet(isPresented: $showingReorder) { ReorderChannelsView(entries: sidebarEntries) }
+        .sheet(isPresented: $reorderingGroups) { ReorderGroupsView(groups: model.groups) }
         .sheet(item: Binding(get: { editingGroup.map(Identified.init) },
                              set: { editingGroup = $0?.value })) { wrapper in
             GroupEditor(groupID: wrapper.value)

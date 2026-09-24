@@ -625,6 +625,7 @@ private struct MacTopicRows: View {
 struct MacRail: View {
     @Environment(AppModel.self) private var model
     @Environment(MacUIState.self) private var ui
+    @State private var dropTarget: String?
 
     static let width: CGFloat = 64
 
@@ -656,6 +657,26 @@ struct MacRail: View {
                         MacGroupAvatar(name: group.name, icon: group.icon, active: ui.section == .group(group.id))
                     }
                     .help(index < 7 ? "\(group.name)  ⌘\(index + 3)" : group.name)
+                    .draggable(group.id) {
+                        MacGroupAvatar(name: group.name, icon: group.icon)
+                    }
+                    .dropDestination(for: String.self) { ids, _ in
+                        guard let id = ids.first else { return false }
+                        model.moveGroup(id, onto: group.id)
+                        return true
+                    } isTargeted: { targeted in
+                        if targeted {
+                            dropTarget = group.id
+                        } else if dropTarget == group.id {
+                            dropTarget = nil
+                        }
+                    }
+                    .overlay {
+                        if dropTarget == group.id {
+                            RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor, lineWidth: 2)
+                                .frame(width: 44, height: 44)
+                        }
+                    }
                     .contextMenu {
                         Button("Edit Group…") { ui.editingGroup = MacUIState.GroupBox(id: group.id) }
                         Button("Delete Group", role: .destructive) {
