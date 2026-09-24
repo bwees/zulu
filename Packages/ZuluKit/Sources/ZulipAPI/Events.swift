@@ -21,7 +21,9 @@ public struct RegisterResponse: Decodable, Sendable {
 /// Only the events Zulu acts on today. Anything else decodes to `.other` and is skipped,
 /// which is also how the client survives a server newer than it is.
 public enum ZulipEvent: Sendable {
-    case message(ZulipMessage)
+    /// `localID` is set only on the queue that sent the message, and only when the send
+    /// carried one.
+    case message(ZulipMessage, localID: String?)
     case updateMessage(id: Int, renderedContent: String?)
     case deleteMessage(ids: [Int])
     case flags(operation: String, flag: String, messageIDs: [Int])
@@ -81,11 +83,12 @@ struct EventEnvelope: Decodable {
     let sender: TypingUser?
     let recipients: [TypingUser]?
     let topic: String?
+    let local_message_id: LenientString?
 
     func decoded() -> ZulipEvent {
         switch type {
         case "message":
-            if let message { return .message(message) }
+            if let message { return .message(message, localID: local_message_id.flatMap(\.value)) }
         case "update_message":
             if let id = message_id { return .updateMessage(id: id, renderedContent: rendered_content) }
         case "delete_message":
@@ -243,5 +246,23 @@ extension ZulipClient {
             "op": "add",
             "flag": "read",
         ])
+    }
+}
+
+/// The `local_id` a client sent, handed back on its echo. Documented as a string, but a
+/// field of the wrong type must not fail the whole message event, so anything else
+/// reads as no id at all.
+struct LenientString: Decodable, Equatable {
+    let value: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let string = try? container.decode(String.self) {
+            value = string
+        } else if let integer = try? container.decode(Int.self) {
+            value = String(integer)
+        } else {
+            value = nil
+        }
     }
 }

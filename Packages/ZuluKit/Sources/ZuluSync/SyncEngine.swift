@@ -38,13 +38,17 @@ public actor SyncEngine {
         handler(status)
     }
 
-    private var arrivalHandler: (@Sendable (ZulipMessage) -> Void)?
+    private var arrivalHandler: (@Sendable (ZulipMessage, _ localID: String?) -> Void)?
 
     /// Called for each message the event queue delivers, once it is in the store.
     ///
     /// Only the live queue passes through here. The register snapshot and history
     /// backfills are the past, and a notification is about now.
-    public func onMessageArrival(_ handler: @escaping @Sendable (ZulipMessage) -> Void) {
+    /// The queue a send should name so its echo comes back tagged. `nil` while
+    /// registering, when a send simply goes untagged.
+    public var currentQueueID: String? { queueID }
+
+    public func onMessageArrival(_ handler: @escaping @Sendable (ZulipMessage, _ localID: String?) -> Void) {
         arrivalHandler = handler
     }
 
@@ -174,10 +178,10 @@ public actor SyncEngine {
 
     private func apply(_ event: ZulipEvent) async throws {
         switch event {
-        case .message(let message):
+        case .message(let message, let localID):
             try store.save(messages: [message], selfUserID: selfUserID)
             try store.noteArrival(of: message, selfUserID: selfUserID)
-            arrivalHandler?(message)
+            arrivalHandler?(message, localID)
 
         case .deleteMessage(let ids):
             try store.deleteMessages(ids: ids)

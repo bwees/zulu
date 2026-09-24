@@ -84,23 +84,34 @@ extension ZulipClient {
         ])
     }
 
-    public func sendMessage(toChannel id: Int, topic: String, content: String) async throws -> Int {
-        let response: SendMessageResponse = try await send(.post, "messages", parameters: [
-            "type": "stream",
-            "to": String(id),
-            "topic": topic,
-            "content": content,
-        ])
+    public func sendMessage(
+        toChannel id: Int, topic: String, content: String, echo: LocalEcho? = nil
+    ) async throws -> Int {
+        let response: SendMessageResponse = try await send(
+            .post, "messages",
+            parameters: Self.channelMessageParameters(channelID: id, topic: topic, content: content, echo: echo)
+        )
         return response.id
     }
 
-    public func sendMessage(toUsers ids: [Int], content: String) async throws -> Int {
-        let response: SendMessageResponse = try await send(.post, "messages", parameters: [
-            "type": "private",
-            "to": Self.json(ids),
-            "content": content,
-        ])
+    public func sendMessage(toUsers ids: [Int], content: String, echo: LocalEcho? = nil) async throws -> Int {
+        let response: SendMessageResponse = try await send(
+            .post, "messages",
+            parameters: Self.directMessageParameters(userIDs: ids, content: content, echo: echo)
+        )
         return response.id
+    }
+
+    static func channelMessageParameters(
+        channelID: Int, topic: String, content: String, echo: LocalEcho?
+    ) -> [String: String] {
+        ["type": "stream", "to": String(channelID), "topic": topic, "content": content]
+            .merging(echo?.parameters ?? [:]) { current, _ in current }
+    }
+
+    static func directMessageParameters(userIDs: [Int], content: String, echo: LocalEcho?) -> [String: String] {
+        ["type": "private", "to": Self.json(userIDs), "content": content]
+            .merging(echo?.parameters ?? [:]) { current, _ in current }
     }
 
     /// Appends one event to a message's widget log — a vote, a new option, a new question.
@@ -143,5 +154,21 @@ extension ZulipClient {
         }
         let (data, _) = try await URLSession.shared.data(for: request)
         return data
+    }
+}
+
+/// Tags a sent message so its echo on this client's event queue says which send it
+/// answers, rather than leaving the client to guess from the conversation.
+public struct LocalEcho: Sendable, Equatable {
+    public let queueID: String
+    public let localID: String
+
+    public init(queueID: String, localID: String) {
+        self.queueID = queueID
+        self.localID = localID
+    }
+
+    var parameters: [String: String] {
+        ["queue_id": queueID, "local_id": localID]
     }
 }
