@@ -16,6 +16,8 @@ public struct ChannelRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var detectedForum = false
     /// The person's explicit choice, which wins over the detector when set.
     public var modeOverride: Int?
+    /// Nil when the channel follows the account-wide push setting.
+    public var pushNotifications: Bool?
 
     public init(from subscription: Subscription) {
         id = subscription.stream_id
@@ -25,6 +27,7 @@ public struct ChannelRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         isRestricted = subscription.isRestricted
         isMuted = subscription.is_muted ?? false
         pinned = subscription.pin_to_top ?? false
+        pushNotifications = subscription.push_notifications
     }
 }
 

@@ -44,14 +44,19 @@ extension ZuluStore {
     public func replaceMutedTopics(_ userTopics: [UserTopic]) throws {
         try writer.write { db in
             try MutedTopicRecord.deleteAll(db)
-            for userTopic in userTopics where userTopic.policy == .muted {
-                try MutedTopicRecord(channelID: userTopic.stream_id, topic: userTopic.topic_name).save(db)
+            try TopicPolicyRecord.deleteAll(db)
+            for userTopic in userTopics {
+                guard let policy = userTopic.policy else { continue }
+                try Self.setTopicPolicy(policy, topic: userTopic.topic_name, inChannel: userTopic.stream_id, db)
+                if policy == .muted {
+                    try MutedTopicRecord(channelID: userTopic.stream_id, topic: userTopic.topic_name).save(db)
+                }
             }
         }
     }
 
     public func apply(_ userTopic: UserTopic) throws {
-        try setMuted(userTopic.policy == .muted, topic: userTopic.topic_name, inChannel: userTopic.stream_id)
+        try setTopicPolicy(userTopic.policy ?? .inherit, topic: userTopic.topic_name, inChannel: userTopic.stream_id)
     }
 
     public func setMuted(_ muted: Bool, topic: String, inChannel channelID: Int) throws {

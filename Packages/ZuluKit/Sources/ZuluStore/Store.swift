@@ -157,6 +157,7 @@ public final class ZuluStore: Sendable {
         registerHidingMigration(&migrator)
         registerOrderingMigration(&migrator)
         registerMutedTopicMigration(&migrator)
+        registerChannelNotificationMigration(&migrator)
 
         return migrator
     }
@@ -176,20 +177,24 @@ public final class ZuluStore: Sendable {
                 // cached answer with it.
                 try db.execute(
                     sql: """
-                        INSERT INTO channel (id, name, description, color, isRestricted, isMuted, pinned)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO channel (
+                            id, name, description, color, isRestricted, isMuted, pinned, pushNotifications
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             name = excluded.name,
                             description = excluded.description,
                             color = excluded.color,
                             isRestricted = excluded.isRestricted,
                             isMuted = excluded.isMuted,
-                            pinned = excluded.pinned
+                            pinned = excluded.pinned,
+                            pushNotifications = excluded.pushNotifications
                         """,
                     arguments: [
                         subscription.stream_id, subscription.name, subscription.description,
                         subscription.color, subscription.isRestricted,
                         subscription.is_muted ?? false, subscription.pin_to_top ?? false,
+                        subscription.push_notifications,
                     ]
                 )
             }
@@ -268,7 +273,7 @@ public final class ZuluStore: Sendable {
             for table in [
                 "promotedTopic", "channelGroupMember", "channelGroup",
                 "submessage", "reaction", "message", "topic", "channel", "user", "syncState", "unread",
-                "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber", "mutedTopic",
+                "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber", "mutedTopic", "topicPolicy",
             ] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }

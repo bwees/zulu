@@ -10,6 +10,8 @@ public struct PersonalShape: Codable, Equatable, Sendable {
         public var id: String
         public var name: String
         public var position: Int
+        /// A `NotificationLevel` for every channel in the group without its own.
+        public var notificationLevel: Int? = nil
     }
 
     public struct Member: Codable, Equatable, Sendable {
@@ -24,6 +26,8 @@ public struct PersonalShape: Codable, Equatable, Sendable {
         public var hidden: Bool
         public var modeOverride: Int?
         public var position: Int?
+        /// A `NotificationLevel` chosen for this channel. Nil follows its group.
+        public var notificationOverride: Int? = nil
     }
 
     public struct Promotion: Codable, Equatable, Sendable {
@@ -107,19 +111,26 @@ extension ZuluStore {
     }
 
     static func localPersonalShape(_ db: Database) throws -> LocalPersonalShape {
-        let groups = try Row.fetchAll(db, sql: "SELECT id, name, position FROM channelGroup").map {
-            PersonalShape.Group(id: $0["id"], name: $0["name"], position: $0["position"])
+        let groups = try Row.fetchAll(
+            db, sql: "SELECT id, name, position, notificationLevel FROM channelGroup"
+        ).map {
+            PersonalShape.Group(
+                id: $0["id"], name: $0["name"], position: $0["position"],
+                notificationLevel: $0["notificationLevel"]
+            )
         }
         let members = try ChannelGroupMemberRecord.fetchAll(db).map {
             PersonalShape.Member(groupID: $0.groupID, channelID: $0.channelID, position: $0.position)
         }
         let channels = try Row.fetchAll(db, sql: """
-            SELECT id, alias, hidden, modeOverride, position FROM channel
+            SELECT id, alias, hidden, modeOverride, position, notificationOverride FROM channel
              WHERE alias IS NOT NULL OR hidden = 1 OR modeOverride IS NOT NULL OR position IS NOT NULL
+                OR notificationOverride IS NOT NULL
             """).map {
             PersonalShape.ChannelPreference(
                 channelID: $0["id"], alias: $0["alias"], hidden: $0["hidden"],
-                modeOverride: $0["modeOverride"], position: $0["position"]
+                modeOverride: $0["modeOverride"], position: $0["position"],
+                notificationOverride: $0["notificationOverride"]
             )
         }
         let promotions = try Row.fetchAll(
@@ -150,10 +161,13 @@ extension ZuluStore {
                 // Upserted rather than replaced, so the icon this device chose survives.
                 try db.execute(
                     sql: """
-                        INSERT INTO channelGroup (id, name, position) VALUES (?, ?, ?)
-                        ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position
+                        INSERT INTO channelGroup (id, name, position, notificationLevel) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            name = excluded.name,
+                            position = excluded.position,
+                            notificationLevel = excluded.notificationLevel
                         """,
-                    arguments: [group.id, group.name, group.position]
+                    arguments: [group.id, group.name, group.position, group.notificationLevel]
                 )
             }
 
@@ -165,14 +179,19 @@ extension ZuluStore {
             }
 
             try db.execute(sql: """
-                UPDATE channel SET alias = NULL, hidden = 0, modeOverride = NULL, position = NULL
+                UPDATE channel SET alias = NULL, hidden = 0, modeOverride = NULL, position = NULL,
+                                   notificationOverride = NULL
                 """)
             for preference in shape.channels {
                 try db.execute(
-                    sql: "UPDATE channel SET alias = ?, hidden = ?, modeOverride = ?, position = ? WHERE id = ?",
+                    sql: """
+                        UPDATE channel SET alias = ?, hidden = ?, modeOverride = ?, position = ?,
+                                           notificationOverride = ?
+                         WHERE id = ?
+                        """,
                     arguments: [
                         preference.alias, preference.hidden, preference.modeOverride,
-                        preference.position, preference.channelID,
+                        preference.position, preference.notificationOverride, preference.channelID,
                     ]
                 )
             }

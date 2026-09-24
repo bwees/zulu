@@ -12,6 +12,16 @@ public struct MessagesPage: Decodable, Sendable {
 private struct SubscriptionsResponse: Decodable { let subscriptions: [Subscription] }
 private struct TopicsResponse: Decodable { let topics: [ChannelTopic] }
 private struct SendMessageResponse: Decodable { let id: Int }
+private enum SubscriptionProperty: String, Encodable {
+    case isMuted = "is_muted"
+    case pushNotifications = "push_notifications"
+    case desktopNotifications = "desktop_notifications"
+}
+private struct SubscriptionPropertyChange: Encodable {
+    let stream_id: Int
+    let property: SubscriptionProperty
+    let value: Bool
+}
 
 extension ZulipClient {
 
@@ -34,6 +44,21 @@ extension ZulipClient {
             .get, "users/me/subscriptions", parameters: ["include_subscribers": "true"]
         )
         return response.subscriptions
+    }
+
+    /// Both push and desktop follow the one choice, so the phone and the Mac agree on
+    /// how loud a channel is.
+    public func setNotificationProperties(
+        isMuted: Bool, notify: Bool, inChannel channelID: Int
+    ) async throws {
+        let changes = [
+            SubscriptionPropertyChange(stream_id: channelID, property: .isMuted, value: isMuted),
+            SubscriptionPropertyChange(stream_id: channelID, property: .pushNotifications, value: notify),
+            SubscriptionPropertyChange(stream_id: channelID, property: .desktopNotifications, value: notify),
+        ]
+        _ = try await raw(.post, "users/me/subscriptions/properties", parameters: [
+            "subscription_data": Self.json(changes),
+        ])
     }
 
     public func topics(inChannel id: Int) async throws -> [ChannelTopic] {
