@@ -84,12 +84,14 @@ final class PushNotifications: NSObject, UIApplicationDelegate, UNUserNotificati
         return alreadyShowing ? [] : [.banner, .sound, .list]
     }
 
-    nonisolated func userNotificationCenter(
+    /// Main-actor isolated, unlike `willPresent`: UIKit asserts that a tap's completion
+    /// handler runs on the main thread, and a nonisolated async witness calls it from
+    /// the global executor.
+    func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        let target = PushTarget(response.notification.request.content.userInfo)
-        await MainActor.run { open(target) }
+        open(PushTarget(response.notification.request.content.userInfo))
     }
 
     // MARK: routing
