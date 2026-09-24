@@ -60,6 +60,28 @@ struct Badge: View {
     }
 }
 
+/// The small mark beside an unread sidebar row. Its slot is always there, so rows line up
+/// whether or not they have one.
+struct UnreadDot: View {
+    let visible: Bool
+
+    private static let size: CGFloat = 5
+
+    var body: some View {
+        Circle()
+            .fill(.primary)
+            .frame(width: Self.size, height: Self.size)
+            .opacity(visible ? 1 : 0)
+    }
+}
+
+/// How a read sidebar row is drawn. A step brighter than `.secondary`, which made read
+/// rows look disabled.
+enum SidebarTone {
+    static let readTitle = Color.primary.opacity(0.72)
+    static let readIcon = Color.primary.opacity(0.5)
+}
+
 struct ChannelIcon: View {
     let isForum: Bool
     var restricted = false

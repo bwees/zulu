@@ -31,7 +31,8 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
         let wantsMentions = defaults.object(forKey: Self.mentionsKey) as? Bool ?? true
 
         let isDirect = !message.isChannelMessage
-        guard (isDirect && wantsDMs) || (message.isMentioned && wantsMentions) else { return }
+        let level = message.stream_id.map { model.effectiveNotificationLevel(forTopic: message.subject, inChannel: $0) }
+        guard (isDirect && wantsDMs) || (message.isMentioned && wantsMentions) || level == .all else { return }
 
         let destination: AppModel.Destination
         let subtitle: String
@@ -41,7 +42,10 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
             subtitle = message.dmParticipants.count > 2 ? "Group direct message" : ""
         } else {
             guard let channelID = message.stream_id else { return }
-            if !message.isPersonallyMentioned, model.isMuted(topic: message.subject, inChannel: channelID) {
+            // Zulip still delivers a personal mention from a muted channel or topic, and a
+            // topic set to Mentions Only hears them even inside a muted channel.
+            if !message.isPersonallyMentioned,
+               level == .muted {
                 return
             }
             let channelName = model.channel(channelID)?.name ?? message.channelName ?? ""

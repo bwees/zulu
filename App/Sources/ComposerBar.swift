@@ -17,17 +17,19 @@ struct ComposerBar: View {
 
     @State private var draft = ""
     @State private var replyingTo: ReplyDraft?
-    @State private var sending = false
     @State private var uploading = false
     @State private var sendError: String?
     @State private var showEmoji = false
     @State private var attachment: AttachmentSource?
     @State private var pickedPhotos: [PhotosPickerItem] = []
     @State private var autocomplete: ComposeAutocompleteController?
-    @FocusState private var focused: Bool
+    @State private var focusToken = 0
+    @State private var typingSender: TypingSender?
 
     /// Every icon control in the bar is the same circle, so the row reads as one piece.
     private static let controlSize: CGFloat = 26
+    /// Half the field's one-line height.
+    private static let fieldCornerRadius: CGFloat = 20
 
     var body: some View {
         VStack(spacing: 6) {
@@ -69,7 +71,7 @@ struct ComposerBar: View {
                 field
 
                 Button {
-                    Task { await send() }
+                    send()
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.body.weight(.semibold))
@@ -77,12 +79,14 @@ struct ComposerBar: View {
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .task(id: source) {
+            typingSender?.stop()
+            typingSender = TypingSender { [model, source] op in await model.sendTyping(op, in: source) }
             EmojiCatalogueLoader.shared.start(store: model.storeForReading)
             let controller = ComposeAutocompleteController(model: model, source: source)
             await controller.prepare()
@@ -93,7 +97,11 @@ struct ComposerBar: View {
         .task(id: EmojiCatalogueLoader.shared.catalogue.candidates.count) {
             await autocomplete?.prepare()
         }
-        .onChange(of: draft) { autocomplete?.update(draft: draft) }
+        .onChange(of: draft) {
+            autocomplete?.update(draft: draft)
+            typingSender?.draftChanged(to: draft)
+        }
+        .onDisappear { typingSender?.stop() }
         .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
         .sheet(isPresented: $showEmoji) { EmojiPicker { insert($0) } }
         .photosPicker(
@@ -155,12 +163,14 @@ struct ComposerBar: View {
 
     private var field: some View {
         HStack(alignment: .bottom, spacing: 6) {
-            TextField(placeholder, text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .padding(.leading, 14)
-                .padding(.vertical, 9)
+            ComposerTextView(
+                text: $draft,
+                placeholder: placeholder,
+                focusToken: focusToken,
+                onImage: { data, type in
+                    Task { await upload(data: data, filename: Self.pastedName(type), contentType: type.preferredMIME) }
+                }
+            )
 
             Button {
                 showEmoji = true
@@ -175,7 +185,8 @@ struct ComposerBar: View {
             .padding(.trailing, 7)
             .padding(.bottom, 5)
         }
-        .glassEffect(.regular, in: .capsule)
+        // A capsule while one line tall; rounded corners that stay put once it grows.
+        .glassEffect(.regular, in: .rect(cornerRadius: Self.fieldCornerRadius))
     }
 
     /// A quote-and-reply is appended rather than replacing what is there, so replying
@@ -184,12 +195,12 @@ struct ComposerBar: View {
         let key = ConversationKey.of(source)
         if let reply = ComposerInbox.shared.takeReply(for: key) {
             withAnimation(.snappy(duration: 0.24)) { replyingTo = reply }
-            focused = true
+            focusToken += 1
         }
         guard let text = ComposerInbox.shared.take(for: key) else { return }
         if !draft.isEmpty, !draft.hasSuffix("\n") { draft += "\n" }
         draft += text
-        focused = true
+        focusToken += 1
     }
 
     /// The picker hands back a shortcode rather than a character, because the server
@@ -200,38 +211,15 @@ struct ComposerBar: View {
         draft += shortcode
     }
 
-    private func send() async {
+    /// Hands the message to the outbox and clears at once; a failure shows on the
+    /// message itself, with a resend.
+    private func send() {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return }
-        sending = true
+        model.enqueue(typed, replyingTo: replyingTo, in: source)
         sendError = nil
-        let previousDraft = draft
-        let previousReply = replyingTo
         draft = ""
         withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
-        defer { sending = false }
-
-        // The quote markdown is assembled here rather than when the reply was started,
-        // so the field held the person's own words the whole time they were typing.
-        let text: String
-        if let previousReply, let quote = await model.quotedPrefix(for: previousReply, in: source) {
-            text = quote + typed
-        } else {
-            text = typed
-        }
-
-        let failure: String?
-        switch source {
-        case .topic(let channelID, let name, _):
-            failure = await model.send(text, toChannel: channelID, topic: name)
-        case .dm(let key):
-            failure = await model.send(text, toDM: key)
-        }
-        if let failure {
-            sendError = failure
-            draft = previousDraft
-            replyingTo = previousReply
-        }
     }
 
     // MARK: attachments
@@ -253,6 +241,10 @@ struct ComposerBar: View {
             let name = "\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "dat")"
             await upload(data: data, filename: name, contentType: type.preferredMIME)
         }
+    }
+
+    private static func pastedName(_ type: UTType) -> String {
+        "pasted-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "png")"
     }
 
     private func upload(urls: [URL]) async {

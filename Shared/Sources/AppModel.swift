@@ -37,6 +37,15 @@ final class AppModel {
     private(set) var allChannels: [ChannelSummary] = []
     private(set) var groups: [ChannelGroupSummary] = []
     fileprivate(set) var unfiledChannels: [ChannelSummary] = []
+    fileprivate(set) var unfiledPromoted: [PromotedTopicSummary] = []
+    /// The unfiled pile's rail button, which counts its promoted topics as well as its
+    /// channels.
+    var unfiledHasUnread: Bool {
+        unfiledChannels.contains { $0.unreadCount > 0 } || unfiledPromoted.contains { $0.unreadCount > 0 }
+    }
+    var unfiledMentionCount: Int {
+        unfiledChannels.reduce(0) { $0 + $1.mentionCount } + unfiledPromoted.reduce(0) { $0 + $1.mentionCount }
+    }
     fileprivate(set) var recentTopics: [Int: [TopicSummary]] = [:]
     fileprivate var sidebarObserversStarted = false
     private(set) var dms: [DMSummary] = []
@@ -52,6 +61,8 @@ final class AppModel {
     /// Each message the live queue delivers, for a platform that wants to notify about
     /// it. Unset, arrivals are simply written to the store like everything else.
     var messageArrivalHandler: ((ZulipMessage) -> Void)?
+    let typing = TypingIndicators()
+    let outbox = Outbox()
 
     fileprivate var store: ZuluStore?
     fileprivate var client: ZulipClient?
@@ -97,7 +108,14 @@ final class AppModel {
                 Task { @MainActor in self?.status = status }
             }
             await sync.onMessageArrival { [weak self] message in
-                Task { @MainActor in self?.messageArrivalHandler?(message) }
+                Task { @MainActor in
+                    self?.clearTyping(after: message)
+                    if message.sender_id == account.userID { self?.outbox.echoed(messageID: message.id) }
+                    self?.messageArrivalHandler?(message)
+                }
+            }
+            await sync.onTyping { [weak self] event in
+                Task { @MainActor in self?.apply(event) }
             }
             await sync.start()
         } catch {
@@ -249,24 +267,44 @@ final class AppModel {
 
     // MARK: sending
 
+    enum SendOutcome {
+        case sent(messageID: Int)
+        case failed(String)
+    }
+
     func send(_ text: String, toChannel id: Int, topic: String) async -> String? {
-        guard let client else { return "Not signed in." }
+        if case .failed(let reason) = await sendReturningID(text, in: .topic(channelID: id, name: topic, channelName: "")) {
+            return reason
+        }
+        return nil
+    }
+
+    func sendReturningID(_ text: String, in source: ConversationSource) async -> SendOutcome {
+        guard let client, let selfID = account?.userID else { return .failed("Not signed in.") }
         do {
-            _ = try await client.sendMessage(toChannel: id, topic: topic, content: text)
-            return nil
+            switch source {
+            case .topic(let channelID, let name, _):
+                return .sent(messageID: try await client.sendMessage(toChannel: channelID, topic: name, content: text))
+            case .dm(let key):
+                let recipients = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
+                return .sent(messageID: try await client.sendMessage(
+                    toUsers: recipients.isEmpty ? [selfID] : recipients, content: text
+                ))
+            }
         } catch {
-            return Self.describe(error)
+            return .failed(Self.describe(error))
         }
     }
 
-    func send(_ text: String, toDM key: String) async -> String? {
-        guard let client, let selfID = account?.userID else { return "Not signed in." }
-        let recipients = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
-        do {
-            _ = try await client.sendMessage(toUsers: recipients.isEmpty ? [selfID] : recipients, content: text)
-            return nil
-        } catch {
-            return Self.describe(error)
+    /// Typing is a courtesy, so a failure is dropped rather than shown.
+    func sendTyping(_ op: TypingOp, in source: ConversationSource) async {
+        guard let client, let selfID = account?.userID else { return }
+        switch source {
+        case .topic(let channelID, let name, _):
+            try? await client.setTyping(op, inChannel: channelID, topic: name)
+        case .dm(let key):
+            let others = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
+            try? await client.setTyping(op, toUsers: others.isEmpty ? [selfID] : others)
         }
     }
 
@@ -487,7 +525,10 @@ extension AppModel {
     }
 
     func setChannels(_ ids: [Int], inGroup groupID: String) {
+        let added = Set(ids).subtracting(channelIDs(inGroup: groupID))
         try? store?.setChannels(ids, inGroup: groupID)
+        guard !added.isEmpty else { return }
+        Task { await applyGroupLevel(toNewMembers: Array(added), ofGroup: groupID) }
     }
 
     /// The group a channel is filed in, or nil when it sits in the unfiled pile.
@@ -578,6 +619,12 @@ extension AppModel {
             }
         )
         observers.append(
+            store.observePromotedTopics(inGroup: nil).start(in: store.writer, onError: { _ in }) {
+                [weak self] rows in
+                self?.unfiledPromoted = rows
+            }
+        )
+        observers.append(
             store.observeRecentTopics().start(in: store.writer, onError: { _ in }) { [weak self] rows in
                 self?.recentTopics = Dictionary(grouping: rows, by: \.channelID)
             }
@@ -621,6 +668,14 @@ extension AppModel {
 
     func generalChat(in channel: ChannelSummary) -> Destination {
         .topic(channelID: channel.id, name: generalChatTopic(inChannel: channel.id), channelName: channel.name)
+    }
+
+    /// A forum's sidebar row opens its general chat, unless that chat has its own row
+    /// already; then the forum's row opens the topic list instead.
+    func forumRowDestination(for channel: ChannelSummary) -> Destination {
+        isPromoted(topic: generalChatTopic(inChannel: channel.id), inChannel: channel.id)
+            ? .channel(channel.id)
+            : generalChat(in: channel)
     }
 }
 
@@ -685,21 +740,97 @@ extension AppModel {
 // MARK: - Muted topics
 
 extension AppModel {
-    /// Written locally first so the topic leaves the list at once. The server's own
-    /// `user_topic` event confirms it, and a refusal puts it back.
     func setMuted(_ muted: Bool, topic: String, inChannel channelID: Int) async {
-        try? store?.setMuted(muted, topic: topic, inChannel: channelID)
-        do {
-            try await client?.setTopicVisibility(
-                muted ? .muted : .inherit, topic: topic, inChannel: channelID
-            )
-        } catch {
-            try? store?.setMuted(!muted, topic: topic, inChannel: channelID)
-        }
+        await setNotificationLevel(muted ? .muted : nil, forTopic: topic, inChannel: channelID)
     }
 
     func isMuted(topic: String, inChannel channelID: Int) -> Bool {
         (try? store?.isMuted(topic: topic, inChannel: channelID)) ?? false
+    }
+}
+
+// MARK: - Notification levels
+
+extension AppModel {
+    /// What Zulip has for the channel right now.
+    func notificationLevel(forChannel id: Int) -> NotificationLevel {
+        (try? store?.notificationLevel(forChannel: id)) ?? .zulipDefault
+    }
+
+    func notificationOverride(forChannel id: Int) -> NotificationLevel? {
+        try? store?.notificationOverride(forChannel: id)
+    }
+
+    /// What "Default" means for a channel: its group's level, or Zulip's own default.
+    func inheritedNotificationLevel(forChannel id: Int) -> NotificationLevel {
+        group(containingChannel: id).flatMap(notificationLevel(forGroup:)) ?? .zulipDefault
+    }
+
+    /// `nil` hands the channel back to its group.
+    func setNotificationOverride(_ level: NotificationLevel?, forChannel id: Int) async {
+        try? store?.setNotificationOverride(level, forChannel: id)
+        await writeThrough(level ?? inheritedNotificationLevel(forChannel: id), toChannel: id)
+    }
+
+    func notificationLevel(forGroup id: String) -> NotificationLevel? {
+        try? store?.notificationLevel(forGroup: id)
+    }
+
+    /// Zulip has no groups, so the level is written onto each channel that follows the
+    /// group. Clearing it leaves those channels as they are.
+    func setNotificationLevel(_ level: NotificationLevel?, forGroup id: String) async {
+        try? store?.setNotificationLevel(level, forGroup: id)
+        guard let level else { return }
+        for channelID in (try? store?.channelsFollowing(group: id)) ?? [] {
+            await writeThrough(level, toChannel: channelID)
+        }
+    }
+
+    /// A channel filed into a group takes the group's level, unless it has its own.
+    fileprivate func applyGroupLevel(toNewMembers channelIDs: [Int], ofGroup id: String) async {
+        guard let level = notificationLevel(forGroup: id) else { return }
+        let following = Set((try? store?.channelsFollowing(group: id)) ?? [])
+        for channelID in channelIDs where following.contains(channelID) {
+            await writeThrough(level, toChannel: channelID)
+        }
+    }
+
+    /// Written locally first so the menu reflects the choice at once. A refusal puts
+    /// the old level back.
+    private func writeThrough(_ level: NotificationLevel, toChannel id: Int) async {
+        let previous = notificationLevel(forChannel: id)
+        guard previous != level else { return }
+        try? store?.setNotificationLevel(level, forChannel: id)
+        do {
+            try await client?.setNotificationProperties(
+                isMuted: level.isMuted, notify: level.pushNotifications, inChannel: id
+            )
+        } catch {
+            try? store?.setNotificationLevel(previous, forChannel: id)
+        }
+    }
+
+    /// `nil` when the topic follows its channel.
+    func notificationLevel(forTopic topic: String, inChannel channelID: Int) -> NotificationLevel? {
+        try? store?.notificationLevel(forTopic: topic, inChannel: channelID)
+    }
+
+    /// What the notifier should do for a message: the topic's own level, else the channel's.
+    func effectiveNotificationLevel(forTopic topic: String, inChannel channelID: Int) -> NotificationLevel {
+        notificationLevel(forTopic: topic, inChannel: channelID) ?? notificationLevel(forChannel: channelID)
+    }
+
+    /// Written locally first so a muted topic leaves the list at once. The server's own
+    /// `user_topic` event confirms it, and a refusal puts it back.
+    func setNotificationLevel(_ level: NotificationLevel?, forTopic topic: String, inChannel channelID: Int) async {
+        let previous = notificationLevel(forTopic: topic, inChannel: channelID)
+        let policy = level?.topicPolicy ?? .inherit
+        try? store?.setTopicPolicy(policy, topic: topic, inChannel: channelID)
+        do {
+            try await client?.setTopicVisibility(policy, topic: topic, inChannel: channelID)
+        } catch {
+            try? store?.setTopicPolicy(previous?.topicPolicy ?? .inherit, topic: topic, inChannel: channelID)
+        }
     }
 
     func mutedTopicObservation(inChannel id: Int)

@@ -28,7 +28,10 @@ struct ConversationView: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            ComposerBar(source: source, placeholder: placeholder)
+            VStack(spacing: 0) {
+                TypingIndicatorView(source: source)
+                ComposerBar(source: source, placeholder: placeholder)
+            }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -56,10 +59,9 @@ struct ConversationView: View {
             let loader = MessageHistoryLoader(source: source, model: model)
             self.loader = loader
             readTracker = ReadTracker { ids in await model.markRead(ids) }
+            // Nothing is marked read here: a conversation opens at its first unread, and
+            // the rows the reader scrolls past mark themselves.
             await loader.start()
-            // A conversation always opens at its live edge, so opening it is reaching
-            // the end of it.
-            await model.markConversationRead(source)
         }
         .onDisappear {
             loader?.stop()
@@ -100,6 +102,11 @@ struct ConversationView: View {
                     .onAppear { readTracker?.sawMessage(id: entry.message.id) }
                     .id(entry.message.id)
                 }
+
+                ForEach(model.pendingEntries(in: source, after: loader.messages)) { pending in
+                    PendingMessageRow(message: pending.message, startsGroup: pending.startsGroup)
+                        .padding(.top, pending.startsGroup ? 14 : 2)
+                }
             }
             .scrollTargetLayout()
             .padding(.horizontal, 16)
@@ -111,6 +118,9 @@ struct ConversationView: View {
         // this mechanism instead of using it.
         .scrollPosition($scroll, anchor: .top)
         .defaultScrollAnchor(.bottom)
+        .onAppear {
+            if let firstUnread = loader.firstUnreadID { scroll.scrollTo(id: firstUnread, anchor: .top) }
+        }
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         .onScrollPhaseChange { _, phase in loader.noteScrollPhase(phase) }
         .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
@@ -154,6 +164,11 @@ struct ConversationView: View {
         // content when the message is the last one.
         .onChange(of: loader.messages.last?.id) { _, newest in
             guard atBottom, newest != nil else { return }
+            withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
+        }
+        // Sending always shows what was sent, even from partway up the history.
+        .onChange(of: model.outbox.messages(in: source).count) { old, new in
+            guard new > old else { return }
             withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
         }
     }

@@ -275,7 +275,7 @@ struct MacShellView: View {
                     mentions: channel.mentionCount
                 )
             }
-            .tag(model.generalChat(in: channel))
+            .tag(model.forumRowDestination(for: channel))
             .contextMenu { channelMenu(channel) }
         } else {
             MacSidebarRow(
@@ -305,6 +305,7 @@ struct MacShellView: View {
         }
         Button("Hide Channel") { model.setHidden(true, forChannel: channel.id) }
         Button("Muted Topics…") { ui.mutedTopicsChannel = ChannelSummaryBox(channel: channel) }
+        NotificationLevelMenu.channel(channel.id, model: model)
         Divider()
         Menu("Move to Group") {
             Button("Unfiled") { model.moveChannel(channel.id, toGroup: nil) }
@@ -358,9 +359,7 @@ struct MacShellView: View {
             Button("Remove from Sidebar") {
                 model.demote(topic: promoted.topic, inChannel: promoted.channelID)
             }
-            Button("Mute Topic") {
-                Task { await model.setMuted(true, topic: promoted.topic, inChannel: promoted.channelID) }
-            }
+            NotificationLevelMenu.topic(promoted.topic, inChannel: promoted.channelID, model: model)
             Divider()
             Menu("Move to Group") {
                 Button("Unfiled") {
@@ -468,18 +467,24 @@ struct MacSidebarRow: View {
     var unread = 0
     var mentions = 0
 
+    /// Read rows sit back in gray and an unread one lights up with a dot beside it, so
+    /// what is new stands out without a column of counts.
+    private var isUnread: Bool { unread > 0 }
+
     var body: some View {
         HStack(spacing: 7) {
+            UnreadDot(visible: isUnread)
             if let symbol {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isUnread ? Color.primary : SidebarTone.readIcon)
                     .frame(width: 16)
             }
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.body.weight(unread > 0 ? .semibold : .regular))
+                        .font(.body.weight(isUnread ? .semibold : .regular))
+                        .foregroundStyle(isUnread ? Color.primary : SidebarTone.readTitle)
                         .lineLimit(1)
                     if restricted {
                         Image(systemName: "lock.fill")
@@ -495,15 +500,9 @@ struct MacSidebarRow: View {
                 }
             }
             Spacer(minLength: 4)
-            // A mention is addressed to you and outranks a plain unread; the count
-            // shown is whichever one you would act on first.
+            // Only a mention is counted: it is addressed to you.
             if mentions > 0 {
                 Badge(count: mentions, mention: true)
-            } else if unread > 0 {
-                Text(unread > 99 ? "99+" : "\(unread)")
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 1)
@@ -584,9 +583,7 @@ private struct MacTopicRows: View {
                         Button("Promote to Sidebar") {
                             model.promote(topic: topic.name, inChannel: channel.id, toGroup: groupID)
                         }
-                        Button("Mute Topic") {
-                            Task { await model.setMuted(true, topic: topic.name, inChannel: channel.id) }
-                        }
+                        NotificationLevelMenu.topic(topic.name, inChannel: channel.id, model: model)
                     }
                 }
                 if topics.count > Self.shown {
@@ -679,6 +676,7 @@ struct MacRail: View {
                     }
                     .contextMenu {
                         Button("Edit Group…") { ui.editingGroup = MacUIState.GroupBox(id: group.id) }
+                        NotificationLevelMenu.group(group.id, model: model)
                         Button("Delete Group", role: .destructive) {
                             if ui.section == .group(group.id) { ui.section = .unfiled }
                             model.deleteGroup(id: group.id)
@@ -690,8 +688,8 @@ struct MacRail: View {
 
                 railButton(
                     active: ui.section == .unfiled,
-                    unread: model.unfiledChannels.contains { $0.unreadCount > 0 },
-                    mentions: model.unfiledChannels.reduce(0) { $0 + $1.mentionCount }
+                    unread: model.unfiledHasUnread,
+                    mentions: model.unfiledMentionCount
                 ) {
                     ui.section = .unfiled
                 } label: {

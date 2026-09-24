@@ -17,12 +17,12 @@ struct MacComposerBar: View {
     @State private var pendingCursor: Int?
     @State private var focusToken = 0
     @State private var replyingTo: ReplyDraft?
-    @State private var sending = false
     @State private var uploading = false
     @State private var sendError: String?
     @State private var importingFiles = false
     @State private var showingEmoji = false
     @State private var autocomplete: ComposeAutocompleteController?
+    @State private var typingSender: TypingSender?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -60,14 +60,14 @@ struct MacComposerBar: View {
                 field
 
                 Button {
-                    Task { await send() }
+                    send()
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.body.weight(.semibold))
                         .frame(width: 18, height: 18)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .help("Send  ⏎")
                 .padding(.bottom, 2)
             }
@@ -76,6 +76,8 @@ struct MacComposerBar: View {
         .padding(.vertical, 8)
         .background(.bar)
         .task(id: source) {
+            typingSender?.stop()
+            typingSender = TypingSender { [model, source] op in await model.sendTyping(op, in: source) }
             EmojiCatalogueLoader.shared.start(store: model.storeForReading)
             let controller = ComposeAutocompleteController(model: model, source: source)
             await controller.prepare()
@@ -87,7 +89,11 @@ struct MacComposerBar: View {
         .task(id: EmojiCatalogueLoader.shared.catalogue.candidates.count) {
             await autocomplete?.prepare()
         }
-        .onChange(of: draft) { autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor) }
+        .onChange(of: draft) {
+            autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor)
+            typingSender?.draftChanged(to: draft)
+        }
+        .onDisappear { typingSender?.stop() }
         .onChange(of: cursor) { autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor) }
         .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
         .onChange(of: ui.composerFocusRequests) { focusToken += 1 }
@@ -180,7 +186,7 @@ struct MacComposerBar: View {
                 accept(suggestion)
                 return true
             }
-            Task { await send() }
+            send()
             return true
         case .tab:
             guard open, let suggestion = autocomplete?.selectedSuggestion else { return false }
@@ -247,39 +253,16 @@ struct MacComposerBar: View {
         pendingCursor = draft.utf16.count
     }
 
-    private func send() async {
+    /// Hands the message to the outbox and clears at once; a failure shows on the
+    /// message itself, with a resend.
+    private func send() {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !typed.isEmpty, !sending else { return }
-        sending = true
+        guard !typed.isEmpty else { return }
+        model.enqueue(typed, replyingTo: replyingTo, in: source)
         sendError = nil
-        let previousDraft = draft
-        let previousReply = replyingTo
         draft = ""
         autocomplete?.dismiss()
         withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
-        defer { sending = false }
-
-        // The quote markdown is assembled here rather than when the reply was started,
-        // so the field held the person's own words the whole time they were typing.
-        let text: String
-        if let previousReply, let quote = await model.quotedPrefix(for: previousReply, in: source) {
-            text = quote + typed
-        } else {
-            text = typed
-        }
-
-        let failure: String?
-        switch source {
-        case .topic(let channelID, let name, _):
-            failure = await model.send(text, toChannel: channelID, topic: name)
-        case .dm(let key):
-            failure = await model.send(text, toDM: key)
-        }
-        if let failure {
-            sendError = failure
-            draft = previousDraft
-            replyingTo = previousReply
-        }
     }
 
     // MARK: attachments

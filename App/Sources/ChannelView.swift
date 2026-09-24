@@ -59,9 +59,7 @@ struct ChannelView: View {
                     Button("Promote to sidebar", systemImage: "arrow.up.left") {
                         model.promote(topic: topic.name, inChannel: channel.id)
                     }
-                    Button("Mute topic", systemImage: "bell.slash") {
-                        Task { await model.setMuted(true, topic: topic.name, inChannel: channel.id) }
-                    }
+                    NotificationLevelMenu.topic(topic.name, inChannel: channel.id, model: model)
                 }
             }
         }

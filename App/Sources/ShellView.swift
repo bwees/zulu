@@ -44,13 +44,24 @@ struct ShellView: View {
     private static let slide = Animation.snappy(duration: 0.24, extraBounce: 0)
 
     private func setOpen(_ value: Bool) {
-        if value { drawerMounted = true }
+        if value {
+            drawerMounted = true
+            dismissKeyboard()
+        }
         withAnimation(Self.slide, completionCriteria: .removed) {
             open = value
             drag = 0
         } completion: {
             if !open { drawerMounted = false }
         }
+    }
+
+    /// The composer lives in a different view tree from the drawer, so its focus state
+    /// cannot be reached from here.
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+        )
     }
 
     var body: some View {
@@ -83,7 +94,10 @@ struct ShellView: View {
                             // Left-to-right belongs to the drawer; right-to-left is left
                             // alone so row swipe actions keep it.
                             guard open || value.translation.width > 0 else { return }
-                            if value.translation.width > 0 { drawerMounted = true }
+                            if value.translation.width > 0, !drawerMounted {
+                                drawerMounted = true
+                                dismissKeyboard()
+                            }
                             drag = value.translation.width
                         }
                         .onEnded { value in
@@ -137,6 +151,7 @@ struct ShellView: View {
                     }
                     .contextMenu {
                         Button("Edit group", systemImage: "pencil") { editingGroup = group.id }
+                        NotificationLevelMenu.group(group.id, model: model)
                         Button("Reorder groups", systemImage: "arrow.up.arrow.down") {
                             reorderingGroups = true
                         }
@@ -152,8 +167,8 @@ struct ShellView: View {
 
                 railButton(
                     active: section == .unfiled,
-                    unread: model.unfiledChannels.contains { $0.unreadCount > 0 },
-                    mentions: model.unfiledChannels.reduce(0) { $0 + $1.mentionCount }
+                    unread: model.unfiledHasUnread,
+                    mentions: model.unfiledMentionCount
                 ) { section = .unfiled } label: {
                     RailIcon(systemImage: "number", active: section == .unfiled)
                 }
@@ -325,7 +340,7 @@ struct ShellView: View {
     /// further, from the toolbar of any topic in it.
     private func channelRow(_ channel: ChannelSummary) -> some View {
         let destination = channel.rendersAsForum
-            ? model.generalChat(in: channel)
+            ? model.forumRowDestination(for: channel)
             : AppModel.Destination.channel(channel.id)
         return Button {
             model.destination = destination
@@ -333,21 +348,18 @@ struct ShellView: View {
             setOpen(false)
         } label: {
             HStack(spacing: 7) {
+                UnreadDot(visible: channel.unreadCount > 0)
                 ChannelIcon(
                     isForum: channel.rendersAsForum, restricted: channel.isRestricted, size: 15
                 )
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(channel.unreadCount > 0 ? Color.primary : SidebarTone.readIcon)
                 .frame(width: 22, alignment: .leading)
                 Text(channel.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(channel.unreadCount > 0 ? .primary : .secondary)
+                    .font(.subheadline.weight(channel.unreadCount > 0 ? .semibold : .medium))
+                    .foregroundStyle(channel.unreadCount > 0 ? Color.primary : SidebarTone.readTitle)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if channel.mentionCount > 0 {
-                    Badge(count: channel.mentionCount, mention: true)
-                } else if channel.unreadCount > 0 {
-                    Circle().fill(.primary).frame(width: 6, height: 6)
-                }
+                Badge(count: channel.mentionCount, mention: true)
             }
             .padding(.horizontal, 8)
             .frame(height: 34)
@@ -369,6 +381,7 @@ struct ShellView: View {
                 mutedTopicsChannel = channel
             }
             Divider()
+            NotificationLevelMenu.channel(channel.id, model: model)
             Picker("Show as", selection: Binding(
                 get: { model.modeOverride(forChannel: channel.id) },
                 set: { model.setMode($0, forChannel: channel.id) }
@@ -423,14 +436,12 @@ struct ShellView: View {
             setOpen(false)
         } label: {
             HStack(spacing: 6) {
+                UnreadDot(visible: topic.unreadCount > 0)
                 Text(topic.name.isEmpty ? "general chat" : topic.name)
-                    .font(.subheadline.weight(topic.unreadCount > 0 ? .medium : .regular))
-                    .foregroundStyle(topic.unreadCount > 0 ? .primary : .secondary)
+                    .font(.subheadline.weight(topic.unreadCount > 0 ? .semibold : .regular))
+                    .foregroundStyle(topic.unreadCount > 0 ? Color.primary : SidebarTone.readTitle)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if topic.unreadCount > 0 {
-                    Circle().fill(.primary).frame(width: 5, height: 5)
-                }
             }
             .padding(.horizontal, 8)
             .frame(height: 32)
@@ -445,9 +456,7 @@ struct ShellView: View {
             Button("Promote to sidebar", systemImage: "arrow.up.left") {
                 model.promote(topic: topic.name, inChannel: channel.id, toGroup: currentGroupID)
             }
-            Button("Mute topic", systemImage: "bell.slash") {
-                Task { await model.setMuted(true, topic: topic.name, inChannel: channel.id) }
-            }
+            NotificationLevelMenu.topic(topic.name, inChannel: channel.id, model: model)
         }
     }
 
@@ -467,21 +476,18 @@ struct ShellView: View {
             setOpen(false)
         } label: {
             HStack(spacing: 7) {
+                UnreadDot(visible: promoted.unreadCount > 0)
                 // A promoted topic is one conversation, not a list of them, so it takes
                 // the plain channel icon — and the lock if its parent channel is private.
                 ChannelIcon(isForum: false, restricted: promoted.isRestricted, size: 15)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(promoted.unreadCount > 0 ? Color.primary : SidebarTone.readIcon)
                     .frame(width: 22, alignment: .leading)
                 Text(promoted.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(promoted.unreadCount > 0 ? .primary : .secondary)
+                    .font(.subheadline.weight(promoted.unreadCount > 0 ? .semibold : .medium))
+                    .foregroundStyle(promoted.unreadCount > 0 ? Color.primary : SidebarTone.readTitle)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if promoted.mentionCount > 0 {
-                    Badge(count: promoted.mentionCount, mention: true)
-                } else if promoted.unreadCount > 0 {
-                    Circle().fill(.primary).frame(width: 6, height: 6)
-                }
+                Badge(count: promoted.mentionCount, mention: true)
             }
             .padding(.horizontal, 8)
             .frame(height: 34)
@@ -500,9 +506,7 @@ struct ShellView: View {
             Button("Remove from sidebar", systemImage: "arrow.down.right") {
                 model.demote(topic: promoted.topic, inChannel: promoted.channelID)
             }
-            Button("Mute topic", systemImage: "bell.slash") {
-                Task { await model.setMuted(true, topic: promoted.topic, inChannel: promoted.channelID) }
-            }
+            NotificationLevelMenu.topic(promoted.topic, inChannel: promoted.channelID, model: model)
             Menu("Move to group", systemImage: "folder") {
                 Button("Unfiled") {
                     model.setGroup(nil, forPromotedTopic: promoted.topic, inChannel: promoted.channelID)
