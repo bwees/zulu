@@ -241,6 +241,12 @@ final class ComposerTextView: NSTextView {
         super.paste(sender)
     }
 
+    /// A plain-text view turns Paste off when the pasteboard holds no text, so an image
+    /// alone never reached `paste(_:)`.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.png, .tiff, .fileURL]
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         Self.fileURLs(on: sender.draggingPasteboard) != nil ? .copy : super.draggingEntered(sender)
     }
