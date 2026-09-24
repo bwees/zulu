@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/slop-place/zulu/compare/zulu-v1.2.1...zulu-v1.3.0) (2026-09-24)
+
+
+### Features
+
+* **app:** reorder channel groups on the rail ([98381ac](https://github.com/slop-place/zulu/commit/98381ac68d6285018dc310b4855ab2ad7c84250d))
+
 ## [1.2.1](https://github.com/slop-place/zulu/compare/zulu-v1.2.0...zulu-v1.2.1) (2026-09-24)
 
 
