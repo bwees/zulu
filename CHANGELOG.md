@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/slop-place/zulu/compare/zulu-v1.1.2...zulu-v1.2.0) (2026-09-24)
+
+
+### Features
+
+* **app:** configure notification service url with status and test page ([437fb07](https://github.com/slop-place/zulu/commit/437fb07543c8c55bd3eaf6acf7eaf9f10dd1659a))
+
 ## [1.1.2](https://github.com/slop-place/zulu/compare/zulu-v1.1.1...zulu-v1.1.2) (2026-09-24)
 
 
