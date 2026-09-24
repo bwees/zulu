@@ -48,6 +48,13 @@ public actor SyncEngine {
         arrivalHandler = handler
     }
 
+    private var typingHandler: (@Sendable (TypingEvent) -> Void)?
+
+    /// Typing is never stored: it is only true for the next few seconds.
+    public func onTyping(_ handler: @escaping @Sendable (TypingEvent) -> Void) {
+        typingHandler = handler
+    }
+
     private func setStatus(_ new: SyncStatus) {
         guard status != new else { return }
         status = new
@@ -206,6 +213,9 @@ public actor SyncEngine {
 
         case .userTopic(let userTopic):
             try store.apply(userTopic)
+
+        case .typing(let typing):
+            typingHandler?(typing)
 
         case .flags, .heartbeat, .other:
             break

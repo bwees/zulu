@@ -33,6 +33,7 @@ public enum ZulipEvent: Sendable {
     case realmEmojiChanged([String: RealmEmoji])
     case userGroupsChanged
     case userTopic(UserTopic)
+    case typing(TypingEvent)
     case heartbeat
     case other(String)
 
@@ -48,6 +49,7 @@ public enum ZulipEvent: Sendable {
         case .realmEmojiChanged: "realm_emoji"
         case .userGroupsChanged: "user_group"
         case .userTopic: "user_topic"
+        case .typing: "typing"
         case .heartbeat: "heartbeat"
         case .other(let name): name
         }
@@ -76,6 +78,9 @@ struct EventEnvelope: Decodable {
     let stream_id: Int?
     let topic_name: String?
     let visibility_policy: Int?
+    let sender: TypingUser?
+    let recipients: [TypingUser]?
+    let topic: String?
 
     func decoded() -> ZulipEvent {
         switch type {
@@ -123,6 +128,13 @@ struct EventEnvelope: Decodable {
                     stream_id: stream_id, topic_name: topic_name, visibility_policy: visibility_policy
                 ))
             }
+        case "typing":
+            if let op = op.flatMap(TypingOp.init(rawValue:)), let sender {
+                return .typing(TypingEvent(
+                    op: op, senderID: sender.user_id, channelID: stream_id, topic: topic,
+                    recipientIDs: recipients?.map(\.user_id) ?? []
+                ))
+            }
         case "heartbeat":
             return .heartbeat
         default:
@@ -133,6 +145,15 @@ struct EventEnvelope: Decodable {
 }
 
 private struct EventsResponse: Decodable { let events: [EventEnvelope] }
+
+/// The server rejects the whole register if `notification_settings_null` is missing.
+struct ClientCapabilities: Encodable {
+    /// Off, so a channel that follows the account-wide push setting reports that
+    /// setting's value instead of null.
+    let notification_settings_null = false
+    /// Without it the server drops every typing event that is not a direct message.
+    let stream_typing_notifications = true
+}
 
 public struct EventBatch: Sendable {
     public let events: [ZulipEvent]
@@ -146,7 +167,7 @@ extension ZulipClient {
     public func register(eventTypes: [String] = [
         "message", "update_message", "delete_message", "update_message_flags",
         "reaction", "submessage", "subscription", "stream", "realm_user", "user_topic",
-        "realm_emoji", "user_group",
+        "realm_emoji", "user_group", "typing",
     ]) async throws -> RegisterResponse {
         try await send(.post, "register", parameters: [
             "apply_markdown": "true",
@@ -162,6 +183,7 @@ extension ZulipClient {
             // Subscriber lists are what let the `@` box put the people in this channel
             // first, which is the ranking rule both official clients agree on.
             "include_subscribers": "true",
+            "client_capabilities": Self.json(ClientCapabilities()),
         ])
     }
 

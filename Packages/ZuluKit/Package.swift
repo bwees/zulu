@@ -32,6 +32,7 @@ let package = Package(
         // back out, rather than against a transcription of what that parser expects.
         .testTarget(name: "ZuluComposeTests", dependencies: ["ZuluCompose", "ZuluMarkup"]),
         .testTarget(name: "ZuluEmojiTests", dependencies: ["ZuluEmoji"]),
+        .testTarget(name: "ZulipAPITests", dependencies: ["ZulipAPI"]),
         .testTarget(name: "ZuluStoreTests", dependencies: ["ZuluStore", "ZulipAPI", "ZuluEmoji"]),
         .testTarget(name: "ZuluMarkupTests", dependencies: ["ZuluMarkup"]),
         .testTarget(name: "ZuluPollsTests", dependencies: ["ZuluPolls"]),
