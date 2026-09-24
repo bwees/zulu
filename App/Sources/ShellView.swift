@@ -22,6 +22,7 @@ struct ShellView: View {
     @State private var aliasDraft = ""
     @State private var promotedTask: Task<Void, Never>?
     @State private var showingHidden = false
+    @State private var showingNotifications = false
     @State private var mutedTopicsChannel: ChannelSummary?
     @State private var showingReorder = false
     @State private var renamingPromoted: PromotedTopicSummary?
@@ -228,6 +229,7 @@ struct ShellView: View {
                         showingReorder = true
                     }
                     Button("Hidden channels", systemImage: "eye.slash") { showingHidden = true }
+                    Button("Notifications", systemImage: "bell") { showingNotifications = true }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.footnote)
@@ -560,6 +562,7 @@ struct ShellView: View {
                 }
         }
         .sheet(isPresented: $showingHidden) { HiddenChannelsView() }
+        .sheet(isPresented: $showingNotifications) { NotificationSettingsView() }
         .sheet(item: $mutedTopicsChannel) { channel in MutedTopicsView(channel: channel) }
         .sheet(isPresented: $showingReorder) { ReorderChannelsView(entries: sidebarEntries) }
         .sheet(item: Binding(get: { editingGroup.map(Identified.init) },

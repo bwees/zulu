@@ -10,6 +10,7 @@ struct ZuluApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(push.settings)
                 .task {
                     push.attach(model: model)
                     await model.bootstrap()

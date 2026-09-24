@@ -12,6 +12,7 @@ import ZuluStore
 final class PushNotifications: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     private static let log = Logger(subsystem: "com.bwees.zulu", category: "push")
 
+    let settings = NotificationServiceSettings()
     private weak var model: AppModel?
     /// A tap that launched the app before anyone was signed in to route it.
     private var pendingTap: PushTarget?
@@ -36,6 +37,7 @@ final class PushNotifications: NSObject, UIApplicationDelegate, UNUserNotificati
         }
         let granted = try? await UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound])
+        await settings.refreshPermission()
         guard granted == true else { return }
         UIApplication.shared.registerForRemoteNotifications()
     }
@@ -56,16 +58,9 @@ final class PushNotifications: NSObject, UIApplicationDelegate, UNUserNotificati
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        guard let account = model?.account, let service = NotificationServiceClient.configured
-        else { return }
-        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        Task {
-            do {
-                try await service.register(account: account, deviceToken: token)
-            } catch {
-                Self.log.error("notification service registration failed: \(error.localizedDescription)")
-            }
-        }
+        settings.receive(deviceToken: deviceToken)
+        guard let account = model?.account else { return }
+        Task { await settings.register(account: account) }
     }
 
     func application(

@@ -55,7 +55,6 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.bwees.zulu
             CFBundleURLSchemes: [zulip]
-        ZuluNotificationServiceURL: https://zulu-notify.bwees.io
     entitlements:
       path: Zulu.entitlements
       properties:
