@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/slop-place/zulu/compare/zulu-v1.1.1...zulu-v1.1.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* more adjustments ([506ba96](https://github.com/slop-place/zulu/commit/506ba96782e0793ece46665ffc3b41aa00abe69c))
+
 ## [1.1.1](https://github.com/slop-place/zulu/compare/zulu-v1.1.0...zulu-v1.1.1) (2026-09-23)
 
 
