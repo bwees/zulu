@@ -220,4 +220,51 @@ struct QuotedReplyTests {
         #expect(id == 42)
         #expect(quoted == [.image(source: "/user_uploads/thumbnail/x.png", link: nil, alt: "x.png")])
     }
+
+    /// Zulip writes a soft line break as `<br>` followed by a newline in the source.
+    /// Only the `<br>` is a break; the newline after it is markup whitespace.
+    @Test func lineBreakIsOneBreakNotTwo() {
+        #expect(MessageMarkup.blocks(from: "<p>line one<br>\nline two</p>")
+            == [.paragraph([InlineSpan(text: "line one\nline two")])])
+    }
+
+    @Test func sourceWhitespaceCollapsesToOneSpace() {
+        #expect(MessageMarkup.blocks(from: "<p>wrapped\n   across   lines</p>")
+            == [.paragraph([InlineSpan(text: "wrapped across lines")])])
+    }
+
+    @Test func noLeadingSpaceAfterALineBreak() {
+        #expect(MessageMarkup.blocks(from: "<p>one<br> two</p>")
+            == [.paragraph([InlineSpan(text: "one\ntwo")])])
+    }
+
+    @Test func spaceBetweenStyledRunsSurvives() {
+        #expect(MessageMarkup.blocks(from: "<p><strong>bold</strong> <em>italic</em></p>")
+            == [.paragraph([
+                InlineSpan(text: "bold", bold: true),
+                InlineSpan(text: " "),
+                InlineSpan(text: "italic", italic: true),
+            ])])
+    }
+
+    @Test func inlineCodeKeepsItsSpaces() {
+        #expect(MessageMarkup.blocks(from: "<p><code>a  b</code></p>")
+            == [.paragraph([InlineSpan(text: "a  b", code: true)])])
+    }
+
+    /// Loose list items wrap their text in `<p>`, with newlines between the tags.
+    @Test func looseListItemHasNoStrayWhitespace() {
+        let html = "<ul>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n</ul>"
+        #expect(MessageMarkup.blocks(from: html) == [.bulletList([
+            [InlineSpan(text: "one")],
+            [InlineSpan(text: "two")],
+        ])])
+    }
+
+    @Test func nestedListItemsStayOnTheirOwnLines() {
+        let html = "<ul>\n<li>parent<ul>\n<li>child one</li>\n<li>child two</li>\n</ul>\n</li>\n</ul>"
+        #expect(MessageMarkup.blocks(from: html) == [.bulletList([
+            [InlineSpan(text: "parent\nchild one\nchild two")],
+        ])])
+    }
 }

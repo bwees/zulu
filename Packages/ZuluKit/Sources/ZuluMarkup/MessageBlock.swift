@@ -128,7 +128,7 @@ public enum MessageMarkup {
             switch node {
             case .text(let text):
                 if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    pending.append(InlineSpan(text: text))
+                    pending.append(contentsOf: inline([node]))
                 }
 
             case .element(let element):
@@ -286,15 +286,20 @@ public enum MessageMarkup {
             switch node {
             case .text(let text):
                 var span = inherited
-                span.text = text
+                span.text = inherited.code ? text : text.replacing(/[ \t\n\r\f]+/, with: " ")
                 spans.append(span)
 
             case .element(let element):
                 var style = inherited
+                if blockElements.contains(element.name) {
+                    var span = inherited
+                    span.text = String(blockBreak)
+                    spans.append(span)
+                }
                 switch element.name {
                 case "strong", "b": style.bold = true
                 case "em", "i": style.italic = true
-                case "code": style.code = true
+                case "code", "pre": style.code = true
                 case "del", "s", "strike": style.strikethrough = true
                 case "a": style.link = element.attribute("href")
                 case "br":
@@ -375,8 +380,47 @@ public enum MessageMarkup {
         return left == right
     }
 
+    /// Marks where a block element sat inside inline content. It becomes a line break
+    /// unless one is already there, so `<li><p>` does not open with two.
+    private static let blockBreak: Character = "\u{2029}"
+
+    private static let blockElements: Set<String> = [
+        "p", "li", "ul", "ol", "div", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6",
+    ]
+
+    /// HTML's rules, which the server's markup relies on: whitespace in the source is one
+    /// space, and a line never starts with one.
+    private static func normalizeWhitespace(_ spans: [InlineSpan]) -> [InlineSpan] {
+        var previous: Character = "\n"
+        return spans.map { span in
+            var span = span
+            guard !span.code else {
+                previous = span.text.last ?? previous
+                return span
+            }
+            var text = ""
+            for character in span.text {
+                switch character {
+                case " " where previous == " " || previous == "\n":
+                    continue
+                case blockBreak where previous == "\n":
+                    continue
+                case "\n", blockBreak:
+                    if text.last == " " { text.removeLast() }
+                    text.append("\n")
+                    previous = "\n"
+                default:
+                    text.append(character)
+                    previous = character
+                }
+            }
+            span.text = text
+            return span
+        }
+    }
+
     private static func trim(_ spans: [InlineSpan]) -> [InlineSpan] {
-        var spans = merge(spans)
+        var spans = merge(normalizeWhitespace(merge(spans)))
         while let first = spans.first {
             let trimmed = String(first.text.drop(while: { $0 == "\n" || $0 == " " }))
             if trimmed.isEmpty { spans.removeFirst() } else {
