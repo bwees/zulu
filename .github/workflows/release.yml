@@ -52,7 +52,8 @@ jobs:
 
       # One .p12 holds both the development and the distribution identity. xcodebuild
       # archive signs for development and -exportArchive re-signs for distribution,
-      # so a runner with only the distribution certificate cannot get past archiving.      - name: Import signing certificates
+      # so a runner with only the distribution certificate cannot get past archiving.
+      - name: Import signing certificates
         env:
           CERTIFICATE_P12: ${{ secrets.APPLE_SIGNING_CERTIFICATES_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATES_PASSWORD }}
