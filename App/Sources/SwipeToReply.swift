@@ -31,7 +31,7 @@ private struct SwipeToReply: ViewModifier {
             content.offset(x: -offset)
             indicator
         }
-        .simultaneousGesture(drag)
+        .gesture(LeftwardPan(onChange: track, onEnd: release))
     }
 
     /// Rides in from off the trailing edge as the row leaves, and fills in once the swipe
@@ -55,22 +55,50 @@ private struct SwipeToReply: ViewModifier {
 
     private var progress: CGFloat { min(1, offset / Self.trigger) }
 
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in
-                let horizontal = -value.translation.width
-                guard horizontal > 0,
-                      horizontal > abs(value.translation.height) * Self.horizontalBias
-                else { return }
+    private func track(_ horizontal: CGFloat) {
+        offset = Self.banded(max(0, horizontal))
+        setArmed(offset >= Self.trigger)
+    }
 
-                offset = Self.banded(horizontal)
-                setArmed(offset >= Self.trigger)
+    private func release() {
+        if armed { reply() }
+        setArmed(false)
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) { offset = 0 }
+    }
+
+    /// A SwiftUI `DragGesture` claims the touch before it can tell a swipe from a scroll,
+    /// which leaves the conversation unable to scroll. This pan declines to start unless
+    /// the finger is already moving left, so vertical drags always reach the scroll view.
+    private struct LeftwardPan: UIGestureRecognizerRepresentable {
+        let onChange: (CGFloat) -> Void
+        let onEnd: () -> Void
+
+        func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+        func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+            let pan = UIPanGestureRecognizer()
+            pan.delegate = context.coordinator
+            return pan
+        }
+
+        func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+            switch recognizer.state {
+            case .changed:
+                onChange(-recognizer.translation(in: recognizer.view).x)
+            case .ended, .cancelled, .failed:
+                onEnd()
+            default:
+                break
             }
-            .onEnded { _ in
-                if armed { reply() }
-                setArmed(false)
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) { offset = 0 }
+        }
+
+        final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+            func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+                guard let pan = recognizer as? UIPanGestureRecognizer else { return false }
+                let velocity = pan.velocity(in: pan.view)
+                return velocity.x < 0 && -velocity.x > abs(velocity.y) * SwipeToReply.horizontalBias
             }
+        }
     }
 
     private func setArmed(_ value: Bool) {
