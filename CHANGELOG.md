@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/slop-place/zulu/compare/zulu-v1.3.0...zulu-v1.4.0) (2026-09-24)
+
+
+### Features
+
+* **app:** add dark mode app icons ([0f9d79e](https://github.com/slop-place/zulu/commit/0f9d79e89e505e8b1a81b716c63bde5b7881717d))
+
 ## [1.3.0](https://github.com/slop-place/zulu/compare/zulu-v1.2.1...zulu-v1.3.0) (2026-09-24)
 
 
