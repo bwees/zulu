@@ -1,0 +1,36 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.45098,0.47843,0.92941,1.00000",
+      "srgb:0.32941,0.32941,0.81961,1.00000"
+    ],
+    "orientation" : {
+      "start" : { "x" : 0, "y" : 0 },
+      "stop" : { "x" : 1, "y" : 1 }
+    }
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.39216,0.40392,0.87451,1.00000"
+              }
+            }
+          ],
+          "glass" : false,
+          "image-name" : "glyph.png",
+          "name" : "glyph"
+        }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0 },
+      "translucency" : { "enabled" : false, "value" : 0 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

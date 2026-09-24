@@ -84,7 +84,7 @@ targets:
   ZuluMac:
     type: application
     platform: macOS
-    sources: [../Mac/Sources, ../Mac/Assets.xcassets, ../Shared/Sources]
+    sources: [../Mac/Sources, ../Mac/Assets.xcassets, ../Mac/AppIcon.icon, ../Shared/Sources]
     dependencies:
       - package: ZuluKit
         product: ZulipAPI
@@ -132,3 +132,5 @@ targets:
         # A secret already written to the sandbox container is still read back from it.
         DEVELOPMENT_TEAM: 65AMD2STXG
         CODE_SIGN_STYLE: Automatic
+        # Notarization rejects a Developer ID build without it.
+        ENABLE_HARDENED_RUNTIME: YES
