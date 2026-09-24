@@ -6,6 +6,7 @@ struct ZuluMacApp: App {
     @State private var model = AppModel()
     @State private var ui = MacUIState()
     @State private var notifier = MacNotifier()
+    @NSApplicationDelegateAdaptor private var appDelegate: ZuluMacAppDelegate
 
     var body: some Scene {
         // One window, not a group: a chat client with two identical windows open is a
@@ -29,6 +30,14 @@ struct ZuluMacApp: App {
                 .environment(model)
                 .environment(ui)
         }
+    }
+}
+
+/// Closing the window leaves Zulu running, so the event queue keeps delivering
+/// notifications. Clicking the Dock icon brings the window back.
+final class ZuluMacAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }
 
