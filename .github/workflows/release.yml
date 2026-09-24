@@ -3,7 +3,20 @@ name: App release
 # release-please.yml calls this when it cuts a Zulu release.
 on:
   workflow_call:
+    inputs:
+      tag:
+        description: Release tag the Mac DMG is attached to, e.g. zulu-v1.3.0
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag the Mac DMG is attached to, e.g. zulu-v1.3.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 # Two uploads racing would fight over the same build number, so releases queue
 # rather than cancel each other.
@@ -16,8 +29,8 @@ env:
   APPLE_TEAM_ID: 65AMD2STXG
 
 jobs:
-  testflight:
-    name: TestFlight
+  apple:
+    name: TestFlight and Mac DMG
     # Same image as ci.yml: iOS 27 deployment target needs the Xcode 27 runner.
     runs-on: xcode-27
     steps:
@@ -39,8 +52,7 @@ jobs:
 
       # One .p12 holds both the development and the distribution identity. xcodebuild
       # archive signs for development and -exportArchive re-signs for distribution,
-      # so a runner with only the distribution certificate cannot get past archiving.
-      - name: Import signing certificates
+      # so a runner with only the distribution certificate cannot get past archiving.      - name: Import signing certificates
         env:
           CERTIFICATE_P12: ${{ secrets.APPLE_SIGNING_CERTIFICATES_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATES_PASSWORD }}
@@ -137,6 +149,46 @@ jobs:
             --file "$RUNNER_TEMP/export/Zulu.ipa" \
             --apiKey "$API_KEY_ID" \
             --apiIssuer "$API_KEY_ISSUER_ID"
+
+      # Ad-hoc signed, since Apple silicon will not launch unsigned code. Entitlements
+      # are dropped: the iCloud one needs a provisioning profile, and macOS kills an
+      # ad-hoc app that claims it.
+      - name: Build Mac app
+        working-directory: App
+        env:
+          BUILD_NUMBER: ${{ steps.build-number.outputs.value }}
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project Zulu.xcodeproj \
+            -scheme ZuluMac \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/mac-build" \
+            DEVELOPMENT_TEAM= \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS= \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+
+      - name: Build DMG
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/dmg"
+          mkdir -p "$staging"
+          ditto "$RUNNER_TEMP/mac-build/Build/Products/Release/Zulu.app" "$staging/Zulu.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create \
+            -volname Zulu \
+            -srcfolder "$staging" \
+            -format UDZO \
+            -ov "$RUNNER_TEMP/Zulu.dmg"
+
+      - name: Attach DMG to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP/Zulu.dmg" --clobber
 
       - name: Keep the ipa and symbols
         if: always()

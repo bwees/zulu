@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app: ${{ contains(fromJSON(steps.release.outputs.paths_released || '[]'), '.') }}
+      app-tag: ${{ steps.release.outputs.tag_name }}
       notifyd: ${{ contains(fromJSON(steps.release.outputs.paths_released || '[]'), 'service') }}
       notifyd-version: ${{ steps.release.outputs['service--version'] }}
     steps:
@@ -31,6 +32,8 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.app == 'true'
     uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.app-tag }}
     secrets: inherit
 
   notifyd:
