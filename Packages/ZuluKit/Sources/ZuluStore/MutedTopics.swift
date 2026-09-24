@@ -24,6 +24,12 @@ enum TopicMuting {
     }
 
     static let unreadIsVisible = isNotMuted(channel: "u.channelID", topic: "u.topic")
+
+    /// A promoted topic reports its unreads on its own sidebar row, so its channel does
+    /// not light up for them as well.
+    static let unreadIsNotPromoted = """
+        NOT EXISTS (SELECT 1 FROM promotedTopic pt WHERE pt.channelID = u.channelID AND pt.topic = u.topic)
+        """
 }
 
 extension ZuluStore {

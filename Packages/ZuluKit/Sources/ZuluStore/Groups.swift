@@ -64,6 +64,17 @@ public struct ChannelGroupSummary: Decodable, FetchableRecord, Sendable, Identif
 
 extension ZuluStore {
 
+    /// An unread belongs to the group its row sits in: a promoted topic's own group,
+    /// otherwise its channel's.
+    static func unreadIsFiled(in group: String) -> String {
+        """
+        ((\(TopicMuting.unreadIsNotPromoted)
+          AND u.channelID IN (SELECT channelID FROM channelGroupMember m WHERE m.groupID = \(group)))
+         OR EXISTS (SELECT 1 FROM promotedTopic pt
+                     WHERE pt.channelID = u.channelID AND pt.topic = u.topic AND pt.groupID = \(group)))
+        """
+    }
+
     public func observeGroups() -> ValueObservation<ValueReducers.Fetch<[ChannelGroupSummary]>> {
         ValueObservation.tracking { db in
             try ChannelGroupSummary.fetchAll(db, sql: """
@@ -76,12 +87,10 @@ extension ZuluStore {
                          -- that can never be cleared.
                          WHERE hc.hidden = 0
                            AND \(TopicMuting.unreadIsVisible)
-                           AND u.channelID IN (SELECT channelID FROM channelGroupMember m
-                                                WHERE m.groupID = g.id)) AS unreadCount,
+                           AND \(Self.unreadIsFiled(in: "g.id"))) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.isMention = 1
-                           AND u.channelID IN (SELECT channelID FROM channelGroupMember m
-                                                WHERE m.groupID = g.id)) AS mentionCount
+                           AND \(Self.unreadIsFiled(in: "g.id"))) AS mentionCount
                   FROM channelGroup g
                  ORDER BY g.position, g.name COLLATE NOCASE
                 """)
@@ -104,9 +113,11 @@ extension ZuluStore {
                        COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)) AS unreadCount,
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)
+                           AND \(TopicMuting.unreadIsNotPromoted)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
+                         WHERE u.channelID = c.id AND u.isMention = 1
+                           AND \(TopicMuting.unreadIsNotPromoted)) AS mentionCount,
                        c.position
                   FROM channel c
                  WHERE \(membership)

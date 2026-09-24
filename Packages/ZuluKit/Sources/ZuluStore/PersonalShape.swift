@@ -239,9 +239,11 @@ extension ZuluStore {
                        c.pinned, COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)) AS unreadCount,
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)
+                           AND \(TopicMuting.unreadIsNotPromoted)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
-                         WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
+                         WHERE u.channelID = c.id AND u.isMention = 1
+                           AND \(TopicMuting.unreadIsNotPromoted)) AS mentionCount,
                        c.position
                   FROM channel c
                  WHERE c.hidden = 1
