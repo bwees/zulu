@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/slop-place/zulu/compare/notifyd-v1.0.0...notifyd-v1.1.0) (2026-09-24)
+
+
+### Features
+
+* **notifyd:** add test notification endpoint ([1b304e4](https://github.com/slop-place/zulu/commit/1b304e4550b92fe170cb0f74228c61aa79046575))
+
 ## 1.0.0 (2026-09-23)
 
 
