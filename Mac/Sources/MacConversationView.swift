@@ -14,6 +14,7 @@ struct MacConversationView: View {
     @State private var readTracker: ReadTracker?
     @State private var scroll = ScrollPosition(idType: Int.self)
     @State private var atBottom = true
+    @State private var following = false
     @State private var quickReactions: [QuickReaction] = []
     @State private var dropTargeted = false
 
@@ -30,6 +31,8 @@ struct MacConversationView: View {
                 TypingIndicatorView(source: source)
                 MacComposerBar(source: source, placeholder: placeholder)
             }
+            // Behind the typing line too, or history scrolled under it shows through.
+            .background(.bar)
         }
         .overlay {
             if dropTargeted {
@@ -78,6 +81,7 @@ struct MacConversationView: View {
         }
         .environment(\.macQuickReactions, quickReactions)
         .task(id: source) {
+            self.loader?.stop()
             let loader = MessageHistoryLoader(source: source, model: model)
             self.loader = loader
             readTracker = ReadTracker { ids in await model.markRead(ids) }
@@ -126,7 +130,7 @@ struct MacConversationView: View {
                 }
 
                 ForEach(model.pendingEntries(in: source, after: loader.messages)) { pending in
-                    PendingMessageRow(message: pending.message, startsGroup: pending.startsGroup)
+                    PendingMessageRow(message: pending.entry, startsGroup: pending.startsGroup)
                         .padding(.top, pending.startsGroup ? 12 : 1)
                         .padding(.bottom, 1)
                 }
@@ -136,54 +140,66 @@ struct MacConversationView: View {
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .scrollPosition($scroll, anchor: .top)
+        // Holds the bottom row, as the phone does, so a taller composer or an image
+        // loading above leaves the newest messages where they were.
+        .scrollPosition($scroll, anchor: .bottom)
         .defaultScrollAnchor(.bottom)
         .onAppear {
             if let firstUnread = loader.firstUnreadID { scroll.scrollTo(id: firstUnread, anchor: .top) }
         }
-        .onScrollPhaseChange { _, phase in loader.noteScrollPhase(phase) }
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting { following = false }
+            loader.noteScrollPhase(phase)
+        }
         .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
             loader.noteVisible(visible)
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
-            let fromBottom = geometry.contentSize.height
-                - (geometry.contentOffset.y + geometry.containerSize.height)
-            return fromBottom < 120
+            ConversationScroll.isNearBottom(geometry)
         } action: { _, isNearBottom in
             atBottom = isNearBottom
+            if isNearBottom { following = false }
             if isNearBottom {
                 Task { await model.markConversationRead(source) }
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if !atBottom {
-                Button {
-                    withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
-                } label: {
-                    Image(systemName: "arrow.down")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 30, height: 30)
-                        .background(.regularMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(.quaternary))
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+            Group {
+                if !atBottom, !following {
+                    Button {
+                        withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 30, height: 30)
+                            .background(.regularMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(.quaternary))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 12)
+                    .transition(.scale.combined(with: .opacity))
+                    .help("Jump to newest")
                 }
-                .buttonStyle(.plain)
-                .padding(.trailing, 20)
-                .padding(.bottom, 12)
-                .transition(.scale.combined(with: .opacity))
-                .help("Jump to newest")
             }
+            .animation(.snappy(duration: 0.2), value: atBottom || following)
         }
-        .animation(.snappy(duration: 0.2), value: atBottom)
         .onChange(of: loader.messages.last?.id) { _, newest in
-            guard atBottom, newest != nil else { return }
-            withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
+            guard atBottom || following, newest != nil else { return }
+            followNewest()
         }
         // Sending always shows what was sent, even from partway up the history.
-        .onChange(of: model.outbox.messages(in: source).count) { old, new in
+        .onChange(of: model.outbox.count(in: source)) { old, new in
             guard new > old else { return }
-            withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
+            followNewest()
         }
+    }
+
+    /// Without animation, so the jump lands in the same frame as the message.
+    private func followNewest() {
+        following = true
+        scroll.scrollTo(edge: .bottom)
     }
 
     private var title: String {

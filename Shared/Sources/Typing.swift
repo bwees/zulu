@@ -101,13 +101,18 @@ extension AppModel {
     /// A message landing is the end of its sender's typing, whether or not a stop
     /// arrives after it.
     func clearTyping(after message: ZulipMessage) {
-        guard let selfID = account?.userID else { return }
+        guard let conversation = conversationKey(of: message) else { return }
+        typing.stop(message.sender_id, in: conversation)
+    }
+
+    func conversationKey(of message: ZulipMessage) -> String? {
+        guard let selfID = account?.userID else { return nil }
         let source: ConversationSource = if let channelID = message.stream_id, message.isChannelMessage {
             .topic(channelID: channelID, name: message.subject, channelName: "")
         } else {
             .dm(key: MessageRecord.dmKey(for: message.dmParticipants.map(\.id), selfUserID: selfID))
         }
-        typing.stop(message.sender_id, in: ConversationKey.of(source))
+        return ConversationKey.of(source)
     }
 
     func typistNames(in source: ConversationSource) -> [String] {
@@ -115,7 +120,9 @@ extension AppModel {
     }
 }
 
-/// "Ana is typing…" under a conversation. Empty and zero-height when nobody is.
+/// "Ana is typing…" under a conversation. The line is always there, blank when nobody
+/// is typing: a line that came and went resized the bar and moved the whole
+/// conversation with it.
 struct TypingIndicatorView: View {
     let source: ConversationSource
     @Environment(AppModel.self) private var model
@@ -124,17 +131,18 @@ struct TypingIndicatorView: View {
     private static let namedLimit = 2
 
     var body: some View {
-        let names = model.typistNames(in: source)
-        if let text = Self.describe(names) {
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .transition(.opacity)
-        }
+        let text = Self.describe(model.typistNames(in: source))
+        // A space rather than nothing, so the blank line is still one line tall.
+        Text(text ?? " ")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .opacity(text == nil ? 0 : 1)
+            .animation(.easeInOut(duration: 0.15), value: text)
+            .accessibilityHidden(text == nil)
     }
 
     static func describe(_ names: [String]) -> String? {

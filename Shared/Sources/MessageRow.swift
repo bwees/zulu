@@ -16,10 +16,12 @@ struct MessageRow: View {
     var startsGroup = true
     var reactions: [ReactionGroup] = []
 
-    private static let avatarSize: CGFloat = 36
+    static let avatarSize: CGFloat = 36
+    static let gutterSpacing: CGFloat = 10
+    static let headerSpacing: CGFloat = 3
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Self.gutterSpacing) {
             if startsGroup {
                 SenderAvatar(
                     name: message.senderName,
@@ -32,18 +34,31 @@ struct MessageRow: View {
                 Color.clear.frame(width: Self.avatarSize, height: 1)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Self.headerSpacing) {
                 if startsGroup {
-                    HStack(spacing: 6) {
-                        Text(message.senderName).font(.subheadline.weight(.semibold))
-                        Text(message.date, format: .dateTime.hour().minute())
-                            .font(.caption).foregroundStyle(.secondary)
-                        if message.editedAt != nil {
-                            Text("edited").font(.caption2).foregroundStyle(.tertiary)
-                        }
-                    }
+                    MessageHeader(name: message.senderName, date: message.date, edited: message.editedAt != nil)
                 }
                 MessageContent(message: message).messageActions(message, reactions: reactions)
+            }
+        }
+    }
+}
+
+/// Shared with the pending row, so a sent message's header does not shift when the
+/// server's copy replaces it.
+struct MessageHeader: View {
+    let name: String
+    let date: Date
+    let edited: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(name).font(.subheadline.weight(.semibold)).lineLimit(1)
+            Text(date, format: .dateTime.hour().minute())
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize()
+            if edited {
+                Text("edited").font(.caption2).foregroundStyle(.tertiary).fixedSize()
             }
         }
     }

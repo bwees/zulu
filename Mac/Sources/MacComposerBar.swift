@@ -26,12 +26,6 @@ struct MacComposerBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let autocomplete, autocomplete.isOpen {
-                MacAutocompleteBox(
-                    suggestions: autocomplete.suggestions,
-                    selectedIndex: autocomplete.selectedIndex
-                ) { accept($0) }
-            }
             if let sendError {
                 Label(sendError, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.red)
@@ -74,9 +68,21 @@ struct MacComposerBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
+        // Floats above the bar rather than sitting in it: in the bar, every suggestion
+        // list that opened or closed resized it and moved the conversation.
+        .overlay(alignment: .topLeading) {
+            if let autocomplete, autocomplete.isOpen {
+                MacAutocompleteBox(
+                    suggestions: autocomplete.suggestions,
+                    selectedIndex: autocomplete.selectedIndex
+                ) { accept($0) }
+                .padding(.horizontal, 12)
+                .alignmentGuide(.top) { $0[.bottom] }
+            }
+        }
         .task(id: source) {
             typingSender?.stop()
+            restoreDraft()
             typingSender = TypingSender { [model, source] op in await model.sendTyping(op, in: source) }
             EmojiCatalogueLoader.shared.start(store: model.storeForReading)
             let controller = ComposeAutocompleteController(model: model, source: source)
@@ -91,8 +97,9 @@ struct MacComposerBar: View {
         }
         .onChange(of: draft) {
             autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor)
-            typingSender?.draftChanged(to: draft)
+            model.saveDraft(draft, replyingTo: replyingTo, in: source)
         }
+        .onChange(of: replyingTo) { model.saveDraft(draft, replyingTo: replyingTo, in: source) }
         .onDisappear { typingSender?.stop() }
         .onChange(of: cursor) { autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor) }
         .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
@@ -113,6 +120,7 @@ struct MacComposerBar: View {
                 placeholder: placeholder,
                 focusToken: focusToken,
                 onKey: handle(_:),
+                onEdit: { typingSender?.draftChanged(to: $0) },
                 onFiles: { urls in Task { await upload(urls: urls) } },
                 onImage: { data, type in
                     let name = "pasted-\(Self.stamp()).\(type.preferredFilenameExtension ?? "png")"
@@ -253,12 +261,22 @@ struct MacComposerBar: View {
         pendingCursor = draft.utf16.count
     }
 
+    /// Only into an empty composer, so coming back to the conversation never replaces
+    /// something already typed. The cursor goes to the end, where typing left off.
+    private func restoreDraft() {
+        guard draft.isEmpty, replyingTo == nil, let saved = model.savedDraft(in: source) else { return }
+        draft = saved.text
+        replyingTo = saved.reply
+        pendingCursor = saved.text.utf16.count
+    }
+
     /// Hands the message to the outbox and clears at once; a failure shows on the
     /// message itself, with a resend.
     private func send() {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return }
         model.enqueue(typed, replyingTo: replyingTo, in: source)
+        typingSender?.stop()
         sendError = nil
         draft = ""
         autocomplete?.dismiss()

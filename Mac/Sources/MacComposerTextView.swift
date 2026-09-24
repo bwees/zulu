@@ -25,6 +25,8 @@ struct MacComposerTextView: NSViewRepresentable {
     /// Bumped by the parent whenever the field should take focus.
     var focusToken: Int
     var onKey: (ComposerKey) -> Bool
+    /// Called for what the person typed, never for text the parent set.
+    var onEdit: (String) -> Void = { _ in }
     var onFiles: ([URL]) -> Void
     var onImage: (Data, UTType) -> Void
 
@@ -153,6 +155,7 @@ struct MacComposerTextView: NSViewRepresentable {
             guard !isSyncing, let textView = notification.object as? NSTextView else { return }
             knownText = textView.string
             parent.text = textView.string
+            parent.onEdit(textView.string)
             let location = textView.selectedRange().location
             if parent.cursor != location { parent.cursor = location }
         }

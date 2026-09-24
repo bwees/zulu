@@ -100,3 +100,17 @@ extension UTType {
     /// nothing to the system still has to go somewhere.
     var preferredMIME: String { preferredMIMEType ?? "application/octet-stream" }
 }
+
+extension Platform {
+    /// The body text's line, top of the tallest letter to the bottom of the lowest. An
+    /// inline picture this size, dropped by the descender, sits on the line without
+    /// making it taller than its neighbours.
+    static var bodyLine: (height: CGFloat, descender: CGFloat) {
+        #if canImport(UIKit)
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        #else
+        let font = NSFont.preferredFont(forTextStyle: .body)
+        #endif
+        return (ceil(font.ascender - font.descender), font.descender)
+    }
+}

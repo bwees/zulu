@@ -15,9 +15,10 @@ struct ChannelView: View {
             if channel.rendersAsForum || topics.count > 1 {
                 topicList
             } else if let only = topics.first {
-                ConversationView(
-                    source: .topic(channelID: channel.id, name: only.name, channelName: channel.name)
+                let source = ConversationView.Source.topic(
+                    channelID: channel.id, name: only.name, channelName: channel.name
                 )
+                ConversationView(source: source).id(source)
             } else {
                 EmptyStateView(text: "Nothing in #\(channel.name) yet.")
             }

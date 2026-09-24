@@ -655,12 +655,16 @@ struct ShellView: View {
             } else {
                 EmptyStateView(text: "That channel is no longer available.")
             }
+        // Identified by conversation, so moving between two of them starts the scroll
+        // position, the loader and the draft fresh instead of carrying them across.
         case .topic(let channelID, let name, let channelName):
-            ConversationView(source: .topic(
+            let source = ConversationView.Source.topic(
                 channelID: channelID, name: name, channelName: channelName
-            ))
+            )
+            ConversationView(source: source).id(source)
         case .dm(let key):
-            ConversationView(source: .dm(key: key))
+            let source = ConversationView.Source.dm(key: key)
+            ConversationView(source: source).id(source)
         case nil:
             EmptyStateView(text: model.allChannels.isEmpty
                 ? "Syncing your channels…"

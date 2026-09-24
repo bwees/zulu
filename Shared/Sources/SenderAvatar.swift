@@ -22,7 +22,9 @@ struct SenderAvatar: View {
 
     var body: some View {
         Group {
-            if let image {
+            // Read from the cache as well as state, so an avatar scrolled back into view
+            // does not flash its initials first.
+            if let image = image ?? source.flatMap(DecodedImages.image(at:)) {
                 image
                     .resizable()
                     .scaledToFill()
@@ -37,9 +39,16 @@ struct SenderAvatar: View {
 
     private func load() async {
         guard let source, !source.isEmpty else { return }
+        if let cached = DecodedImages.image(at: source) {
+            image = cached
+            return
+        }
         // Gravatar and the realm's own uploads both arrive here; `imageData` decides
         // which of them may see the account's credentials.
-        guard let data = await model.imageData(at: source) else { return }
-        image = Platform.image(from: data)
+        guard let data = await model.imageData(at: source),
+              let decoded = Platform.image(from: data)
+        else { return }
+        DecodedImages.store(decoded, at: source)
+        image = decoded
     }
 }

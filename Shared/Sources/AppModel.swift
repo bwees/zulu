@@ -63,6 +63,8 @@ final class AppModel {
     var messageArrivalHandler: ((ZulipMessage) -> Void)?
     let typing = TypingIndicators()
     let outbox = Outbox()
+    /// Unsent drafts, one per conversation, kept for the signed-in account.
+    private(set) var drafts: DraftStore?
 
     fileprivate var store: ZuluStore?
     fileprivate var client: ZulipClient?
@@ -92,6 +94,7 @@ final class AppModel {
             self.client = client
             RealmContext.realmURL = account.realmURL
             self.sync = sync
+            drafts = DraftStore(storage: UserDefaultsDraftStorage(key: Self.draftsKey(for: account)))
 
             let shapeSync = PersonalShapeSync(
                 store: store, cloud: UbiquitousDocumentStore(), realmURL: account.realmURL
@@ -107,10 +110,13 @@ final class AppModel {
             await sync.onStatusChange { [weak self] status in
                 Task { @MainActor in self?.status = status }
             }
-            await sync.onMessageArrival { [weak self] message in
+            await sync.onMessageArrival { [weak self] message, localID in
                 Task { @MainActor in
                     self?.clearTyping(after: message)
-                    if message.sender_id == account.userID { self?.outbox.echoed(messageID: message.id) }
+                    if message.sender_id == account.userID,
+                       let conversation = self?.conversationKey(of: message) {
+                        self?.outbox.echoed(messageID: message.id, localID: localID, in: conversation)
+                    }
                     self?.messageArrivalHandler?(message)
                 }
             }
@@ -221,6 +227,10 @@ final class AppModel {
         users = [:]
         destination = nil
         UserDefaults.standard.removeObject(forKey: Self.lastDestinationKey)
+        // The store is wiped on sign-out, and what was typed there goes with it.
+        drafts?.removeAll()
+        drafts = nil
+        outbox.removeAll()
         phase = .signedOut
     }
 
@@ -279,21 +289,29 @@ final class AppModel {
         return nil
     }
 
-    func sendReturningID(_ text: String, in source: ConversationSource) async -> SendOutcome {
+    func sendReturningID(
+        _ text: String, in source: ConversationSource, echo: LocalEcho? = nil
+    ) async -> SendOutcome {
         guard let client, let selfID = account?.userID else { return .failed("Not signed in.") }
         do {
             switch source {
             case .topic(let channelID, let name, _):
-                return .sent(messageID: try await client.sendMessage(toChannel: channelID, topic: name, content: text))
+                return .sent(messageID: try await client.sendMessage(
+                    toChannel: channelID, topic: name, content: text, echo: echo
+                ))
             case .dm(let key):
                 let recipients = key.split(separator: ",").compactMap { Int($0) }.filter { $0 != selfID }
                 return .sent(messageID: try await client.sendMessage(
-                    toUsers: recipients.isEmpty ? [selfID] : recipients, content: text
+                    toUsers: recipients.isEmpty ? [selfID] : recipients, content: text, echo: echo
                 ))
             }
         } catch {
             return .failed(Self.describe(error))
         }
+    }
+
+    func currentQueueID() async -> String? {
+        await sync?.currentQueueID
     }
 
     /// Typing is a courtesy, so a failure is dropped rather than shown.
@@ -577,29 +595,36 @@ extension AppModel {
 // MARK: - History
 
 extension AppModel {
+    enum OlderHistory {
+        case more
+        case reachedStart
+        /// The fetch failed. Scrolling up again tries again.
+        case unavailable
+    }
+
     /// Fetches the page of messages older than `oldestHeld`, and reports whether anything
     /// older still exists.
     ///
     /// End of history is `found_oldest`, never an empty page: a narrow that matches nothing
     /// returns zero messages and both flags true, which is a different thing entirely.
     /// `history_limited` is its own answer — more once existed, but retention removed it.
-    func loadOlder(channelID: Int, topic: String, before oldestHeld: Int) async -> Bool {
+    func loadOlder(channelID: Int, topic: String, before oldestHeld: Int) async -> OlderHistory {
         await loadOlder(narrow: [.channel(channelID), .topic(topic)], before: oldestHeld)
     }
 
-    func loadOlder(dmKey: String, before oldestHeld: Int) async -> Bool {
+    func loadOlder(dmKey: String, before oldestHeld: Int) async -> OlderHistory {
         let ids = dmKey.split(separator: ",").compactMap { Int($0) }
         return await loadOlder(narrow: [.dm(ids)], before: oldestHeld)
     }
 
-    private func loadOlder(narrow: [NarrowFilter], before oldestHeld: Int) async -> Bool {
-        guard let client, let store, let account else { return false }
+    private func loadOlder(narrow: [NarrowFilter], before oldestHeld: Int) async -> OlderHistory {
+        guard let client, let store, let account else { return .unavailable }
         guard let page = try? await client.messages(
             narrow: narrow, anchor: .id(oldestHeld), before: 50, after: 0, includeAnchor: false
-        ) else { return false }
+        ) else { return .unavailable }
 
         try? store.save(messages: page.messages, selfUserID: account.userID)
-        return !page.found_oldest && !(page.history_limited ?? false)
+        return page.found_oldest || (page.history_limited ?? false) ? .reachedStart : .more
     }
 }
 
@@ -891,6 +916,11 @@ extension AppModel {
 
 extension AppModel {
     private static let lastDestinationKey = "com.bwees.zulu.lastDestination"
+
+    /// Per account, since conversation keys are only unique within one realm.
+    fileprivate static func draftsKey(for account: ZulipAccount) -> String {
+        "com.bwees.zulu.drafts.\(account.realmURL.absoluteString).\(account.userID)"
+    }
 
     /// Reopening on the conversation you left is the difference between a chat app and a
     /// filing cabinet. Stored in defaults rather than the database because it is about this

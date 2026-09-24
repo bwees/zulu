@@ -76,6 +76,7 @@ final class MessageHistoryLoader {
                         isReady = true
                     }
                     messages = rows
+                    model.outbox.settle(landed: Set(rows.map(\.id)))
                 }
             } catch {
                 // Observation ends when the conversation closes; nothing to recover.
@@ -101,12 +102,13 @@ final class MessageHistoryLoader {
         isLoadingOlder = true
         defer { isLoadingOlder = false }
 
-        hasMoreOlder = switch source {
+        let result = switch source {
         case .topic(let channelID, let name, _):
             await model.loadOlder(channelID: channelID, topic: name, before: oldest)
         case .dm(let key):
             await model.loadOlder(dmKey: key, before: oldest)
         }
+        if result == .reachedStart { hasMoreOlder = false }
     }
 
     /// Consecutive messages from one person collapse under a single header, the way every
@@ -126,7 +128,7 @@ final class MessageHistoryLoader {
     }
 
     /// Five minutes, matching what Discord and Slack settle on.
-    private static let groupingWindow = 5 * 60
+    static let groupingWindow = 5 * 60
 }
 
 struct GroupedMessage: Identifiable {
@@ -156,5 +158,19 @@ extension MessageHistoryLoader {
                 // Ends with the conversation; nothing to recover.
             }
         }
+    }
+}
+
+enum ConversationScroll {
+    /// Close enough to the newest message to count as reading it, and to keep following
+    /// new ones as they arrive.
+    static let nearBottomDistance: CGFloat = 120
+
+    /// Measured to the end of the content inset, which is where the list stops when
+    /// scrolled all the way down: the composer sits over the bottom of the content.
+    static func isNearBottom(_ geometry: ScrollGeometry) -> Bool {
+        let end = geometry.contentSize.height + geometry.contentInsets.bottom
+        let fromBottom = end - (geometry.contentOffset.y + geometry.containerSize.height)
+        return fromBottom < nearBottomDistance
     }
 }

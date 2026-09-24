@@ -1,3 +1,4 @@
+import ZuluCompose
 import ZuluStore
 
 /// One conversation: a channel topic, or a DM.
@@ -29,5 +30,29 @@ struct ReplyDraft: Equatable, Identifiable {
         author = message.senderName
         authorID = message.senderID
         preview = MessageActionsController.plainText(of: message.renderedContent)
+    }
+}
+
+extension ReplyDraft {
+    init(_ saved: SavedReply) {
+        messageID = saved.messageID
+        author = saved.author
+        authorID = saved.authorID
+        preview = saved.preview
+    }
+
+    var saved: SavedReply {
+        SavedReply(messageID: messageID, author: author, authorID: authorID, preview: preview)
+    }
+}
+
+extension AppModel {
+    func savedDraft(in source: ConversationSource) -> (text: String, reply: ReplyDraft?)? {
+        guard let saved = drafts?.draft(for: ConversationKey.of(source)) else { return nil }
+        return (saved.text, saved.reply.map(ReplyDraft.init))
+    }
+
+    func saveDraft(_ text: String, replyingTo reply: ReplyDraft?, in source: ConversationSource) {
+        drafts?.save(SavedDraft(text: text, reply: reply?.saved), for: ConversationKey.of(source))
     }
 }

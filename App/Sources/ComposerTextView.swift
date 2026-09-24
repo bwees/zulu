@@ -11,6 +11,8 @@ struct ComposerTextView: UIViewRepresentable {
     var placeholder: String
     /// Bumped by the parent whenever the field should take focus.
     var focusToken: Int
+    /// Called for what the person typed, never for text the parent set.
+    var onEdit: (String) -> Void = { _ in }
     var onImage: (Data, UTType) -> Void
 
     static let maxLines = 5
@@ -58,6 +60,7 @@ struct ComposerTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            parent.onEdit(textView.text)
             (textView as? PastingTextView)?.textChanged()
         }
     }

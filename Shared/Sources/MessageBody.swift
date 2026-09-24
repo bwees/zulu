@@ -4,22 +4,30 @@ import ZuluMarkup
 /// Renders the blocks parsed out of Zulip's `rendered_content`.
 struct MessageBody: View {
     let html: String
+    private let blocks: [MessageBlock]
     @Environment(AppModel.self) private var model
 
     /// Realm custom emoji are images. They are loaded first so the text can be built with
     /// the picture in place rather than the `:name:` fallback.
-    @State private var emoji: [String: EmojiFrames] = [:]
+    @State private var emoji: [String: EmojiFrames]
 
-    /// Custom emoji arrive at whatever size they were uploaded at — often hundreds of
-    /// pixels. `Text` uses an image's intrinsic size, so they are scaled to sit on the
-    /// line rather than tower over it.
-    private static let lineHeight: CGFloat = 20
+    static let blockSpacing: CGFloat = 6
 
     /// Fast enough that nothing looks like a slideshow, slow enough that a message full
     /// of emoji is not redrawn at display rate.
     private static let tick: TimeInterval = 1.0 / 15
 
-    private var blocks: [MessageBlock] { MessageMarkup.blocks(from: html) }
+    init(html: String) {
+        self.html = html
+        let blocks = ParsedMessages.blocks(from: html)
+        self.blocks = blocks
+        let height = Platform.bodyLine.height
+        var cached: [String: EmojiFrames] = [:]
+        for url in Self.emojiURLs(in: blocks) {
+            cached[url] = DecodedImages.emoji(at: url, height: height)
+        }
+        _emoji = State(initialValue: cached)
+    }
 
     var body: some View {
         Group {
@@ -39,22 +47,31 @@ struct MessageBody: View {
     }
 
     private func stack(at time: TimeInterval) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Self.blockSpacing) {
             ForEach(blocks) { block in
                 BlockView(block: block, emoji: emoji, time: time)
             }
         }
     }
 
+    /// Custom emoji arrive at whatever size they were uploaded at — often hundreds of
+    /// pixels. `Text` uses an image's intrinsic size, so they are scaled to the line.
     private func loadEmoji() async {
-        let urls = Set(blocks.flatMap(spans(in:)).compactMap(\.emojiURL))
-        for url in urls where emoji[url] == nil {
-            guard let data = await model.imageData(at: url) else { continue }
-            emoji[url] = EmojiFrames.decode(data, height: Self.lineHeight)
+        let height = Platform.bodyLine.height
+        for url in Self.emojiURLs(in: blocks) where emoji[url] == nil {
+            guard let data = await model.imageData(at: url),
+                  let frames = EmojiFrames.decode(data, height: height)
+            else { continue }
+            DecodedImages.store(frames, at: url, height: height)
+            emoji[url] = frames
         }
     }
 
-    private func spans(in block: MessageBlock) -> [InlineSpan] {
+    private static func emojiURLs(in blocks: [MessageBlock]) -> Set<String> {
+        Set(blocks.flatMap(spans(in:)).compactMap(\.emojiURL))
+    }
+
+    private static func spans(in block: MessageBlock) -> [InlineSpan] {
         switch block {
         case .paragraph(let spans): spans
         case .bulletList(let items), .numberedList(let items): items.flatMap { $0 }
@@ -141,7 +158,7 @@ struct BlockView: View {
         spans.reduce(Text("")) { result, span in
             if let url = span.emojiURL {
                 if let frames = emoji[url] {
-                    return result + Text(frames.frame(at: time)).baselineOffset(-2)
+                    return result + Text(frames.frame(at: time)).baselineOffset(Platform.bodyLine.descender)
                 }
                 return result + Text(span.text).foregroundColor(.secondary)
             }
@@ -245,5 +262,28 @@ private struct QuotedReplyView: View {
             }
         }
         return ""
+    }
+}
+
+/// Parsed once per distinct body. A row's view is rebuilt every time the conversation
+/// changes, and reading the HTML again each time costs frames while scrolling.
+@MainActor
+enum ParsedMessages {
+    private final class Box {
+        let blocks: [MessageBlock]
+        init(_ blocks: [MessageBlock]) { self.blocks = blocks }
+    }
+
+    private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 1000
+        return cache
+    }()
+
+    static func blocks(from html: String) -> [MessageBlock] {
+        if let hit = cache.object(forKey: html as NSString) { return hit.blocks }
+        let blocks = MessageMarkup.blocks(from: html)
+        cache.setObject(Box(blocks), forKey: html as NSString)
+        return blocks
     }
 }

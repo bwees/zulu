@@ -18,6 +18,14 @@ struct RemoteImage: View {
     @State private var image: Image?
     @State private var failed = false
 
+    init(path: String, fullSize: String? = nil, alt: String? = nil, aspectRatio: Double? = nil) {
+        self.path = path
+        self.fullSize = fullSize
+        self.alt = alt
+        self.aspectRatio = aspectRatio
+        _image = State(initialValue: DecodedImages.image(at: path))
+    }
+
     var body: some View {
         Group {
             if let image {
@@ -57,6 +65,7 @@ struct RemoteImage: View {
         .task(id: path) {
             guard image == nil else { return }
             if let data = await model.imageData(at: path), let decoded = Platform.image(from: data) {
+                DecodedImages.store(decoded, at: path)
                 image = decoded
             } else {
                 failed = true
@@ -90,5 +99,44 @@ actor ImageCache {
         while order.count > limit {
             entries.removeValue(forKey: order.removeFirst())
         }
+    }
+}
+
+/// Decoded pictures, held so a row scrolled back into view draws at its final size in
+/// its first frame, instead of starting as a placeholder and growing under the reader.
+@MainActor
+enum DecodedImages {
+    private final class Box<Value> {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    private static let images: NSCache<NSString, Box<Image>> = {
+        let cache = NSCache<NSString, Box<Image>>()
+        cache.countLimit = 300
+        return cache
+    }()
+
+    private static let emoji: NSCache<NSString, Box<EmojiFrames>> = {
+        let cache = NSCache<NSString, Box<EmojiFrames>>()
+        cache.countLimit = 300
+        return cache
+    }()
+
+    static func image(at path: String) -> Image? {
+        images.object(forKey: path as NSString)?.value
+    }
+
+    static func store(_ image: Image, at path: String) {
+        images.setObject(Box(image), forKey: path as NSString)
+    }
+
+    /// Keyed by height as well, since a text size change needs the emoji redrawn.
+    static func emoji(at url: String, height: CGFloat) -> EmojiFrames? {
+        emoji.object(forKey: "\(height)|\(url)" as NSString)?.value
+    }
+
+    static func store(_ frames: EmojiFrames, at url: String, height: CGFloat) {
+        emoji.setObject(Box(frames), forKey: "\(height)|\(url)" as NSString)
     }
 }

@@ -17,6 +17,9 @@ struct ConversationView: View {
     /// Holds the message SwiftUI keeps pinned across data changes. Never written during a
     /// prepend — that is precisely what makes older messages arrive without a jump.
     @State private var scroll = ScrollPosition(idType: Int.self)
+    /// True between asking to follow the newest message and landing there, so the jump
+    /// button does not flash while the list catches up.
+    @State private var following = false
     @State private var atBottom = true
 
     var body: some View {
@@ -56,6 +59,7 @@ struct ConversationView: View {
             }
         }
         .task(id: source) {
+            self.loader?.stop()
             let loader = MessageHistoryLoader(source: source, model: model)
             self.loader = loader
             readTracker = ReadTracker { ids in await model.markRead(ids) }
@@ -104,7 +108,7 @@ struct ConversationView: View {
                 }
 
                 ForEach(model.pendingEntries(in: source, after: loader.messages)) { pending in
-                    PendingMessageRow(message: pending.message, startsGroup: pending.startsGroup)
+                    PendingMessageRow(message: pending.entry, startsGroup: pending.startsGroup)
                         .padding(.top, pending.startsGroup ? 14 : 2)
                 }
             }
@@ -114,24 +118,26 @@ struct ConversationView: View {
             .background(DisablesScrollToTop().frame(width: 0, height: 0))
         }
         // Anchoring by item identity is what keeps the view still while older messages are
-        // prepended. Correcting the offset after the fact — the previous approach — fights
-        // this mechanism instead of using it.
-        .scrollPosition($scroll, anchor: .top)
+        // prepended. The bottom row is the one held, so the keyboard, a taller composer
+        // or an image loading above all leave the newest messages where they were.
+        .scrollPosition($scroll, anchor: .bottom)
         .defaultScrollAnchor(.bottom)
         .onAppear {
             if let firstUnread = loader.firstUnreadID { scroll.scrollTo(id: firstUnread, anchor: .top) }
         }
         .scrollEdgeEffectStyle(.soft, for: .bottom)
-        .onScrollPhaseChange { _, phase in loader.noteScrollPhase(phase) }
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting { following = false }
+            loader.noteScrollPhase(phase)
+        }
         .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
             loader.noteVisible(visible)
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
-            let fromBottom = geometry.contentSize.height
-                - (geometry.contentOffset.y + geometry.containerSize.height)
-            return fromBottom < 120
+            ConversationScroll.isNearBottom(geometry)
         } action: { _, isNearBottom in
             atBottom = isNearBottom
+            if isNearBottom { following = false }
             // Scrolling back down after reading history, and catching up on messages that
             // arrived while the conversation was open, both land here.
             if isNearBottom {
@@ -139,38 +145,46 @@ struct ConversationView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if !atBottom {
-                Button {
-                    withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 24, height: 24)
+            Group {
+                if !atBottom, !following {
+                    Button {
+                        withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .padding(.trailing, 16)
-                .padding(.bottom, 12)
-                .transition(.scale.combined(with: .opacity))
             }
+            // Scoped to the button. On the whole list it also animated whatever else
+            // changed in the same update, like a message landing.
+            .animation(.snappy(duration: 0.2), value: atBottom || following)
         }
-        .animation(.snappy(duration: 0.2), value: atBottom)
-        // The identity anchor pins whatever is on screen, which is right while
-        // reading back but wrong at the live edge: a new message would arrive below
-        // the fold. Following it only while already at the bottom keeps both.
+        // The identity anchor pins whatever is on screen, which is right while reading
+        // back but wrong at the live edge: a new message would arrive below the fold.
+        // Following it only while already at the bottom keeps both.
         //
-        // The bottom edge, not the new message's id: anchoring an id scrolls that
-        // message's top to the top of the viewport, which runs off the end of the
-        // content when the message is the last one.
+        // Without animation, so the jump lands in the same frame as the message and the
+        // list never shows it half off the bottom.
         .onChange(of: loader.messages.last?.id) { _, newest in
-            guard atBottom, newest != nil else { return }
-            withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
+            guard atBottom || following, newest != nil else { return }
+            followNewest()
         }
         // Sending always shows what was sent, even from partway up the history.
-        .onChange(of: model.outbox.messages(in: source).count) { old, new in
+        .onChange(of: model.outbox.count(in: source)) { old, new in
             guard new > old else { return }
-            withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
+            followNewest()
         }
+    }
+
+    private func followNewest() {
+        following = true
+        scroll.scrollTo(edge: .bottom)
     }
 
     private var forumChannel: ChannelSummary? {

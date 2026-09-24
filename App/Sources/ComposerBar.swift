@@ -33,11 +33,6 @@ struct ComposerBar: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            if let autocomplete, autocomplete.isOpen {
-                AutocompleteBox(suggestions: autocomplete.suggestions) { suggestion in
-                    draft = autocomplete.apply(suggestion, to: draft)
-                }
-            }
             if let sendError {
                 Text(sendError).font(.caption).foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -84,8 +79,20 @@ struct ComposerBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        // Floats above the bar rather than sitting in it: in the bar, every suggestion
+        // list that opened or closed resized it and moved the conversation.
+        .overlay(alignment: .top) {
+            if let autocomplete, autocomplete.isOpen {
+                AutocompleteBox(suggestions: autocomplete.suggestions) { suggestion in
+                    draft = autocomplete.apply(suggestion, to: draft)
+                }
+                .padding(.horizontal, 12)
+                .alignmentGuide(.top) { $0[.bottom] }
+            }
+        }
         .task(id: source) {
             typingSender?.stop()
+            restoreDraft()
             typingSender = TypingSender { [model, source] op in await model.sendTyping(op, in: source) }
             EmojiCatalogueLoader.shared.start(store: model.storeForReading)
             let controller = ComposeAutocompleteController(model: model, source: source)
@@ -99,8 +106,9 @@ struct ComposerBar: View {
         }
         .onChange(of: draft) {
             autocomplete?.update(draft: draft)
-            typingSender?.draftChanged(to: draft)
+            model.saveDraft(draft, replyingTo: replyingTo, in: source)
         }
+        .onChange(of: replyingTo) { model.saveDraft(draft, replyingTo: replyingTo, in: source) }
         .onDisappear { typingSender?.stop() }
         .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
         .sheet(isPresented: $showEmoji) { EmojiPicker { insert($0) } }
@@ -167,6 +175,7 @@ struct ComposerBar: View {
                 text: $draft,
                 placeholder: placeholder,
                 focusToken: focusToken,
+                onEdit: { typingSender?.draftChanged(to: $0) },
                 onImage: { data, type in
                     Task { await upload(data: data, filename: Self.pastedName(type), contentType: type.preferredMIME) }
                 }
@@ -211,12 +220,21 @@ struct ComposerBar: View {
         draft += shortcode
     }
 
+    /// Only into an empty composer, so coming back to the conversation never replaces
+    /// something already typed.
+    private func restoreDraft() {
+        guard draft.isEmpty, replyingTo == nil, let saved = model.savedDraft(in: source) else { return }
+        draft = saved.text
+        replyingTo = saved.reply
+    }
+
     /// Hands the message to the outbox and clears at once; a failure shows on the
     /// message itself, with a resend.
     private func send() {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return }
         model.enqueue(typed, replyingTo: replyingTo, in: source)
+        typingSender?.stop()
         sendError = nil
         draft = ""
         withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
