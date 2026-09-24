@@ -117,6 +117,9 @@ public actor SyncEngine {
         if let groups = registration.realm_user_groups {
             try store.replaceUserGroups(groups, selfUserID: selfUserID)
         }
+        if let userTopics = registration.user_topics {
+            try store.replaceMutedTopics(userTopics)
+        }
         if let unread = registration.unread_msgs {
             try store.replaceUnread(unread, selfUserID: selfUserID)
         }
@@ -200,6 +203,9 @@ public actor SyncEngine {
             if let groups = try? await client.userGroups() {
                 try store.replaceUserGroups(groups, selfUserID: selfUserID)
             }
+
+        case .userTopic(let userTopic):
+            try store.apply(userTopic)
 
         case .flags, .heartbeat, .other:
             break

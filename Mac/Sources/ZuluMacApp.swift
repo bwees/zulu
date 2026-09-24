@@ -82,6 +82,7 @@ final class MacUIState {
     var showingHidden = false
     var confirmingSignOut = false
     var newTopicChannel: ChannelSummaryBox?
+    var mutedTopicsChannel: ChannelSummaryBox?
     var editingGroup: GroupBox?
     /// The image expanded over the window, if any.
     var viewingImage: MacImageViewerItem?

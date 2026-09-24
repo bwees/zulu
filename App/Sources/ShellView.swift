@@ -22,6 +22,7 @@ struct ShellView: View {
     @State private var aliasDraft = ""
     @State private var promotedTask: Task<Void, Never>?
     @State private var showingHidden = false
+    @State private var mutedTopicsChannel: ChannelSummary?
     @State private var showingReorder = false
     @State private var renamingPromoted: PromotedTopicSummary?
     @State private var editingGroup: String?
@@ -313,9 +314,14 @@ struct ShellView: View {
         }
     }
 
+    /// A forum's row opens its general chat, not the topic list. The list is one tap
+    /// further, from the toolbar of any topic in it.
     private func channelRow(_ channel: ChannelSummary) -> some View {
-        Button {
-            model.destination = .channel(channel.id)
+        let destination = channel.rendersAsForum
+            ? model.generalChat(in: channel)
+            : AppModel.Destination.channel(channel.id)
+        return Button {
+            model.destination = destination
             path = []
             setOpen(false)
         } label: {
@@ -339,7 +345,7 @@ struct ShellView: View {
             .padding(.horizontal, 8)
             .frame(height: 34)
             .background(
-                model.destination == .channel(channel.id) ? Color(.tertiarySystemFill) : .clear,
+                model.destination == destination ? Color(.tertiarySystemFill) : .clear,
                 in: RoundedRectangle(cornerRadius: 7)
             )
         }
@@ -351,6 +357,9 @@ struct ShellView: View {
             Button("Rename for me…", systemImage: "pencil") {
                 aliasDraft = model.alias(forChannel: channel.id) ?? ""
                 renamingChannel = channel
+            }
+            Button("Muted topics…", systemImage: "bell.slash") {
+                mutedTopicsChannel = channel
             }
             Divider()
             Picker("Show as", selection: Binding(
@@ -373,7 +382,9 @@ struct ShellView: View {
     /// brackets drew more attention than the names they were pointing at.
     @ViewBuilder
     private func topicBranch(under channel: ChannelSummary) -> some View {
-        let topics = model.recentTopics[channel.id] ?? []
+        // The channel's own row is general chat, so it is not listed again here.
+        let generalChat = model.generalChatTopic(inChannel: channel.id)
+        let topics = (model.recentTopics[channel.id] ?? []).filter { $0.name != generalChat }
         if !topics.isEmpty {
             HStack(alignment: .top, spacing: 0) {
                 Rectangle()
@@ -427,6 +438,9 @@ struct ShellView: View {
             Button("Promote to sidebar", systemImage: "arrow.up.left") {
                 model.promote(topic: topic.name, inChannel: channel.id, toGroup: currentGroupID)
             }
+            Button("Mute topic", systemImage: "bell.slash") {
+                Task { await model.setMuted(true, topic: topic.name, inChannel: channel.id) }
+            }
         }
     }
 
@@ -478,6 +492,9 @@ struct ShellView: View {
             }
             Button("Remove from sidebar", systemImage: "arrow.down.right") {
                 model.demote(topic: promoted.topic, inChannel: promoted.channelID)
+            }
+            Button("Mute topic", systemImage: "bell.slash") {
+                Task { await model.setMuted(true, topic: promoted.topic, inChannel: promoted.channelID) }
             }
             Menu("Move to group", systemImage: "folder") {
                 Button("Unfiled") {
@@ -543,6 +560,7 @@ struct ShellView: View {
                 }
         }
         .sheet(isPresented: $showingHidden) { HiddenChannelsView() }
+        .sheet(item: $mutedTopicsChannel) { channel in MutedTopicsView(channel: channel) }
         .sheet(isPresented: $showingReorder) { ReorderChannelsView(entries: sidebarEntries) }
         .sheet(item: Binding(get: { editingGroup.map(Identified.init) },
                              set: { editingGroup = $0?.value })) { wrapper in

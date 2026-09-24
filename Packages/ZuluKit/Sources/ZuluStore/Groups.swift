@@ -75,6 +75,7 @@ extension ZuluStore {
                          -- an unread dot, or hiding a noisy channel would leave a dot
                          -- that can never be cleared.
                          WHERE hc.hidden = 0
+                           AND \(TopicMuting.unreadIsVisible)
                            AND u.channelID IN (SELECT channelID FROM channelGroupMember m
                                                 WHERE m.groupID = g.id)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
@@ -102,7 +103,8 @@ extension ZuluStore {
                 SELECT c.id, COALESCE(c.alias, c.name) AS name, c.isRestricted, c.isMuted, c.pinned,
                        COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
-                       (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
                        c.position

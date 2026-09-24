@@ -424,6 +424,69 @@ struct MacHiddenChannelsSheet: View {
     }
 }
 
+// MARK: - Muted topics
+
+/// A channel's muted topics. Muting takes a topic out of every list, so this is the only
+/// way back to one.
+struct MacMutedTopicsSheet: View {
+    let channel: ChannelSummary
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var topics: [MutedTopicRecord] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Muted in #\(channel.name)").font(.headline)
+                Spacer()
+            }
+            .padding(16)
+
+            Divider()
+
+            if topics.isEmpty {
+                ContentUnavailableView(
+                    "Nothing muted",
+                    systemImage: "bell",
+                    description: Text("Right-click a topic to mute it.")
+                )
+            } else {
+                List(topics, id: \.topic) { topic in
+                    HStack {
+                        Text(topic.topic.isEmpty ? "general chat" : topic.topic)
+                        Spacer()
+                        Button("Unmute") {
+                            Task { await model.setMuted(false, topic: topic.topic, inChannel: channel.id) }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .listStyle(.inset)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 420, height: 400)
+        .task { await observe() }
+    }
+
+    private func observe() async {
+        guard let writer = model.databaseWriter,
+              let observation = model.mutedTopicObservation(inChannel: channel.id)
+        else { return }
+        do {
+            for try await rows in observation.values(in: writer) { topics = rows }
+        } catch {}
+    }
+}
+
 // MARK: - Settings
 
 struct MacSettingsView: View {

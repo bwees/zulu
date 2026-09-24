@@ -57,7 +57,8 @@ extension ZuluStore {
                 SELECT c.id, COALESCE(c.alias, c.name) AS name, c.isRestricted, c.isMuted, c.pinned,
                        COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
-                       (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
                        c.position
@@ -87,6 +88,7 @@ extension ZuluStore {
                    AND t.name NOT IN (
                        SELECT topic FROM promotedTopic WHERE channelID = t.channelID
                    )
+                   AND \(TopicMuting.isNotMuted(channel: "t.channelID", topic: "t.name"))
                  ORDER BY t.maxMessageID DESC
                 """, arguments: [id])
         }
@@ -243,10 +245,12 @@ extension ZuluStore {
                  WHERE t.name NOT IN (
                            SELECT topic FROM promotedTopic WHERE channelID = t.channelID
                        )
+                   AND \(TopicMuting.isNotMuted(channel: "t.channelID", topic: "t.name"))
                    AND (
                         SELECT COUNT(*) FROM topic peer
                          WHERE peer.channelID = t.channelID
                            AND peer.maxMessageID > t.maxMessageID
+                           AND \(TopicMuting.isNotMuted(channel: "peer.channelID", topic: "peer.name"))
                        ) < ?
                  ORDER BY t.channelID, t.maxMessageID DESC
                 """, arguments: [limit])

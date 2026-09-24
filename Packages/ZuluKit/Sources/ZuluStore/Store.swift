@@ -156,6 +156,7 @@ public final class ZuluStore: Sendable {
         registerPersonalShapeMigration(&migrator)
         registerHidingMigration(&migrator)
         registerOrderingMigration(&migrator)
+        registerMutedTopicMigration(&migrator)
 
         return migrator
     }
@@ -267,7 +268,7 @@ public final class ZuluStore: Sendable {
             for table in [
                 "promotedTopic", "channelGroupMember", "channelGroup",
                 "submessage", "reaction", "message", "topic", "channel", "user", "syncState", "unread",
-                "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber",
+                "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber", "mutedTopic",
             ] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }

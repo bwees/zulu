@@ -70,6 +70,8 @@ public struct ZulipMessage: Decodable, Sendable, Equatable, Identifiable {
         guard let flags else { return false }
         return flags.contains("mentioned") || flags.contains("wildcard_mentioned")
     }
+    /// Only a mention by name gets through a muted topic; `@all` does not.
+    public var isPersonallyMentioned: Bool { flags?.contains("mentioned") ?? false }
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
 

@@ -201,7 +201,9 @@ struct MacQuickSwitcher: View {
 
         let channelsByID = Dictionary(uniqueKeysWithValues: model.allChannels.map { ($0.id, $0) })
         for promotion in model.promotedTopics {
-            guard let channel = channelsByID[promotion.channelID] else { continue }
+            guard let channel = channelsByID[promotion.channelID],
+                  !model.isMuted(topic: promotion.topic, inChannel: promotion.channelID)
+            else { continue }
             items.append(Item(
                 id: "p\(promotion.id)",
                 title: promotion.topic.isEmpty ? "general chat" : promotion.topic,

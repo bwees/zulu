@@ -75,6 +75,7 @@ struct BlockView: View {
         switch block {
         case .paragraph(let spans):
             styled(spans)
+                .linkPointer()
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -109,7 +110,7 @@ struct BlockView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, spans in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("•")
-                        styled(spans)
+                        styled(spans).linkPointer()
                     }
                 }
             }
@@ -119,7 +120,7 @@ struct BlockView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, spans in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("\(index + 1).").monospacedDigit()
-                        styled(spans)
+                        styled(spans).linkPointer()
                     }
                 }
             }
@@ -163,6 +164,7 @@ struct BlockView: View {
         }
         if let link = span.link, let url = URL(string: link, relativeTo: RealmContext.realmURL) {
             attributed.link = url
+            return Text(attributed).customAttribute(LinkAttribute())
         }
         return Text(attributed)
     }

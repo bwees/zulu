@@ -44,6 +44,13 @@ struct ConversationView: View {
                     }
                 }
             }
+            if let forum = forumChannel {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("All topics", systemImage: "list.bullet") {
+                        model.destination = .channel(forum.id)
+                    }
+                }
+            }
         }
         .task(id: source) {
             let loader = MessageHistoryLoader(source: source, model: model)
@@ -149,6 +156,13 @@ struct ConversationView: View {
             guard atBottom, newest != nil else { return }
             withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(edge: .bottom) }
         }
+    }
+
+    private var forumChannel: ChannelSummary? {
+        guard case .topic(let channelID, _, _) = source,
+              let channel = model.channel(channelID), channel.rendersAsForum
+        else { return nil }
+        return channel
     }
 
     private var title: String {

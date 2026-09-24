@@ -181,6 +181,7 @@ extension ZuluStore {
                   FROM promotedTopic p
                   JOIN channel c ON c.id = p.channelID
                  WHERE \(membership)
+                   AND \(TopicMuting.isNotMuted(channel: "p.channelID", topic: "p.topic"))
                  ORDER BY p.position
                 """, arguments: arguments)
         }
@@ -237,7 +238,8 @@ extension ZuluStore {
                 SELECT c.id, COALESCE(c.alias, c.name) AS name, c.isRestricted, c.isMuted,
                        c.pinned, COALESCE(c.modeOverride, c.detectedForum) AS isForum,
                        (SELECT COUNT(*) FROM topic t WHERE t.channelID = c.id) AS topicCount,
-                       (SELECT COUNT(*) FROM unread u WHERE u.channelID = c.id) AS unreadCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
                        c.position

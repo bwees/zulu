@@ -41,6 +41,9 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
             subtitle = message.dmParticipants.count > 2 ? "Group direct message" : ""
         } else {
             guard let channelID = message.stream_id else { return }
+            if !message.isPersonallyMentioned, model.isMuted(topic: message.subject, inChannel: channelID) {
+                return
+            }
             let channelName = model.channel(channelID)?.name ?? message.channelName ?? ""
             destination = .topic(channelID: channelID, name: message.subject, channelName: channelName)
             subtitle = "#\(channelName) › \(message.subject.isEmpty ? "general chat" : message.subject)"

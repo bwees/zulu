@@ -77,6 +77,7 @@ struct MacShellView: View {
             .sheet(isPresented: $ui.showingNewMessage) { MacNewMessageSheet() }
             .sheet(isPresented: $ui.showingHidden) { MacHiddenChannelsSheet() }
             .sheet(item: $ui.newTopicChannel) { box in MacNewTopicSheet(channel: box.channel) }
+            .sheet(item: $ui.mutedTopicsChannel) { box in MacMutedTopicsSheet(channel: box.channel) }
             .sheet(item: $ui.editingGroup) { box in MacGroupEditor(groupID: box.id) }
     }
 
@@ -303,6 +304,7 @@ struct MacShellView: View {
             renamingChannel = channel
         }
         Button("Hide Channel") { model.setHidden(true, forChannel: channel.id) }
+        Button("Muted Topics…") { ui.mutedTopicsChannel = ChannelSummaryBox(channel: channel) }
         Divider()
         Menu("Move to Group") {
             Button("Unfiled") { model.moveChannel(channel.id, toGroup: nil) }
@@ -355,6 +357,9 @@ struct MacShellView: View {
             }
             Button("Remove from Sidebar") {
                 model.demote(topic: promoted.topic, inChannel: promoted.channelID)
+            }
+            Button("Mute Topic") {
+                Task { await model.setMuted(true, topic: promoted.topic, inChannel: promoted.channelID) }
             }
             Divider()
             Menu("Move to Group") {
@@ -578,6 +583,9 @@ private struct MacTopicRows: View {
                         .disabled(topic.unreadCount == 0)
                         Button("Promote to Sidebar") {
                             model.promote(topic: topic.name, inChannel: channel.id, toGroup: groupID)
+                        }
+                        Button("Mute Topic") {
+                            Task { await model.setMuted(true, topic: topic.name, inChannel: channel.id) }
                         }
                     }
                 }

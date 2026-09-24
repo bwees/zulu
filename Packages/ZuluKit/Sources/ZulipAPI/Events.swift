@@ -15,6 +15,7 @@ public struct RegisterResponse: Decodable, Sendable {
     /// synthesized by the client.
     public let realm_emoji: [String: RealmEmoji]?
     public let realm_user_groups: [RealmUserGroup]?
+    public let user_topics: [UserTopic]?
 }
 
 /// Only the events Zulu acts on today. Anything else decodes to `.other` and is skipped,
@@ -31,6 +32,7 @@ public enum ZulipEvent: Sendable {
     /// any one of them.
     case realmEmojiChanged([String: RealmEmoji])
     case userGroupsChanged
+    case userTopic(UserTopic)
     case heartbeat
     case other(String)
 
@@ -45,6 +47,7 @@ public enum ZulipEvent: Sendable {
         case .subscriptionsChanged: "subscription"
         case .realmEmojiChanged: "realm_emoji"
         case .userGroupsChanged: "user_group"
+        case .userTopic: "user_topic"
         case .heartbeat: "heartbeat"
         case .other(let name): name
         }
@@ -70,6 +73,9 @@ struct EventEnvelope: Decodable {
     let msg_type: String?
     let content: String?
     let realm_emoji: [String: RealmEmoji]?
+    let stream_id: Int?
+    let topic_name: String?
+    let visibility_policy: Int?
 
     func decoded() -> ZulipEvent {
         switch type {
@@ -111,6 +117,12 @@ struct EventEnvelope: Decodable {
             if let realm_emoji { return .realmEmojiChanged(realm_emoji) }
         case "user_group":
             return .userGroupsChanged
+        case "user_topic":
+            if let stream_id, let topic_name, let visibility_policy {
+                return .userTopic(UserTopic(
+                    stream_id: stream_id, topic_name: topic_name, visibility_policy: visibility_policy
+                ))
+            }
         case "heartbeat":
             return .heartbeat
         default:
@@ -145,7 +157,7 @@ extension ZulipClient {
             // `realm` is also what carries server_emoji_data_url.
             "fetch_event_types": Self.json([
                 "subscription", "realm_user", "realm", "message", "update_message_flags",
-                "realm_emoji", "realm_user_groups",
+                "realm_emoji", "realm_user_groups", "user_topic",
             ]),
             // Subscriber lists are what let the `@` box put the people in this channel
             // first, which is the ranking rule both official clients agree on.

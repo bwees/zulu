@@ -668,6 +668,33 @@ extension AppModel {
     }
 }
 
+// MARK: - Muted topics
+
+extension AppModel {
+    /// Written locally first so the topic leaves the list at once. The server's own
+    /// `user_topic` event confirms it, and a refusal puts it back.
+    func setMuted(_ muted: Bool, topic: String, inChannel channelID: Int) async {
+        try? store?.setMuted(muted, topic: topic, inChannel: channelID)
+        do {
+            try await client?.setTopicVisibility(
+                muted ? .muted : .inherit, topic: topic, inChannel: channelID
+            )
+        } catch {
+            try? store?.setMuted(!muted, topic: topic, inChannel: channelID)
+        }
+    }
+
+    func isMuted(topic: String, inChannel channelID: Int) -> Bool {
+        (try? store?.isMuted(topic: topic, inChannel: channelID)) ?? false
+    }
+
+    func mutedTopicObservation(inChannel id: Int)
+        -> ValueObservation<ValueReducers.Fetch<[MutedTopicRecord]>>?
+    {
+        store?.observeMutedTopics(inChannel: id)
+    }
+}
+
 extension AppModel {
     /// What sits under a conversation's title. When a channel has been renamed locally the
     /// server's own name goes here, since someone else referring to it will use that.
