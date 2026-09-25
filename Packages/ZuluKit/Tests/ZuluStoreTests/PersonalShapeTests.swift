@@ -39,7 +39,8 @@ struct PersonalShapeTests {
             try ChannelSummary.fetchAll(db, sql: """
                 SELECT c.id, COALESCE(c.alias, c.name) AS name, c.isRestricted, c.isMuted,
                        c.pinned, COALESCE(c.modeOverride, c.detectedForum) AS isForum,
-                       0 AS topicCount, 0 AS unreadCount, 0 AS mentionCount
+                       0 AS topicCount, 0 AS unreadCount, 0 AS generalChatUnreadCount,
+                       0 AS mentionCount, 0 AS generalChatMentionCount
                   FROM channel c
                 """)
         }

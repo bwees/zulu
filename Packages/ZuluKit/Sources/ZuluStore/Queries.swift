@@ -13,13 +13,19 @@ public struct ChannelSummary: Decodable, FetchableRecord, Sendable, Identifiable
     /// The detector's answer, already overruled by the person's choice if they made one.
     public var isForum: Bool
     public var unreadCount: Int
+    public var generalChatUnreadCount: Int
     public var mentionCount: Int
+    public var generalChatMentionCount: Int
     /// Where the viewer dragged it. Null until they drag anything.
     public var position: Int?
 
     /// A channel whose recent traffic all sits in one topic is a chat room in practice,
     /// whatever the server thinks. This is the auto-detection the map fixed.
     public var rendersAsForum: Bool { isForum }
+
+    /// A forum's row stands for its general chat; its other topics light their own rows.
+    public var rowUnreadCount: Int { rendersAsForum ? generalChatUnreadCount : unreadCount }
+    public var rowMentionCount: Int { rendersAsForum ? generalChatMentionCount : mentionCount }
 }
 
 public struct TopicSummary: Decodable, FetchableRecord, Sendable, Identifiable, Equatable {
@@ -60,7 +66,13 @@ extension ZuluStore {
                        (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)
+                           AND \(GeneralChat.unreadIsGeneralChat)) AS generalChatUnreadCount,
+                       (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND u.isMention = 1) AS mentionCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND u.isMention = 1
+                           AND \(GeneralChat.unreadIsGeneralChat)) AS generalChatMentionCount,
                        c.position
                   FROM channel c
                  WHERE \(ChannelVisibility.clause)
@@ -208,25 +220,37 @@ extension ZuluStore {
     }
 }
 
+/// The topic a channel's "general chat" lives in, as this server spells it.
+///
+/// Newer servers use the empty name and let clients label it; older ones, and any
+/// server talking to a client that has not opted into the empty name, send the label
+/// itself as the topic. Whichever exists here is the one to open.
+enum GeneralChat {
+    static let fallbackName = "general chat"
+
+    static func topicName(inChannel channel: String) -> String {
+        """
+        (SELECT name FROM topic
+          WHERE channelID = \(channel) AND name IN ('', 'general chat', '(no topic)')
+          ORDER BY CASE name WHEN '' THEN 0 WHEN 'general chat' THEN 1 ELSE 2 END
+          LIMIT 1)
+        """
+    }
+
+    static let unreadIsGeneralChat =
+        "u.topic = COALESCE(\(topicName(inChannel: "u.channelID")), '\(fallbackName)')"
+}
+
 extension ZuluStore {
-    /// The topic a channel's "general chat" lives in, as this server spells it.
-    ///
-    /// Newer servers use the empty name and let clients label it; older ones, and any
-    /// server talking to a client that has not opted into the empty name, send the label
-    /// itself as the topic. Whichever exists here is the one to open.
     public func generalChatTopicName(inChannel id: Int) throws -> String? {
         try writer.read { db in
-            try String.fetchOne(db, sql: """
-                SELECT name FROM topic
-                 WHERE channelID = ? AND name IN ('', 'general chat', '(no topic)')
-                 ORDER BY CASE name WHEN '' THEN 0 WHEN 'general chat' THEN 1 ELSE 2 END
-                 LIMIT 1
-                """, arguments: [id])
+            try String.fetchOne(db, sql: "SELECT \(GeneralChat.topicName(inChannel: "?"))", arguments: [id])
         }
     }
 
     /// The most recently active topics across every channel, so the sidebar can show a
-    /// channel's live conversations without a query per channel.
+    /// channel's live conversations without a query per channel. An unread topic is
+    /// always included, however old, because a forum's own row no longer lights for it.
     public func observeRecentTopics(perChannel limit: Int = 3)
         -> ValueObservation<ValueReducers.Fetch<[TopicSummary]>>
     {
@@ -246,12 +270,14 @@ extension ZuluStore {
                            SELECT topic FROM promotedTopic WHERE channelID = t.channelID
                        )
                    AND \(TopicMuting.isNotMuted(channel: "t.channelID", topic: "t.name"))
-                   AND (
+                   AND ((
                         SELECT COUNT(*) FROM topic peer
                          WHERE peer.channelID = t.channelID
                            AND peer.maxMessageID > t.maxMessageID
                            AND \(TopicMuting.isNotMuted(channel: "peer.channelID", topic: "peer.name"))
                        ) < ?
+                        OR EXISTS (SELECT 1 FROM unread u
+                                    WHERE u.channelID = t.channelID AND u.topic = t.name))
                  ORDER BY t.channelID, t.maxMessageID DESC
                 """, arguments: [limit])
         }

@@ -271,23 +271,40 @@ struct MacShellView: View {
                     title: channel.name,
                     symbol: "bubble.left.and.text.bubble.right",
                     restricted: channel.isRestricted,
-                    unread: channel.unreadCount,
-                    mentions: channel.mentionCount
+                    unread: channel.rowUnreadCount,
+                    mentions: channel.rowMentionCount
                 )
             }
             .tag(model.forumRowDestination(for: channel))
             .contextMenu { channelMenu(channel) }
+            // Collapsing a forum hides what was read, never what is waiting.
+            if !expanded.contains(channel.id) {
+                ForEach(unreadTopics(in: channel)) { topic in
+                    MacTopicRow(topic: topic, channel: channel, groupID: currentGroupID)
+                        .padding(.leading, Self.collapsedTopicIndent)
+                        .moveDisabled(true)
+                }
+            }
         } else {
             MacSidebarRow(
                 title: channel.name,
                 symbol: "number",
                 restricted: channel.isRestricted,
                 unread: channel.unreadCount,
-                mentions: channel.mentionCount
+                mentions: channel.rowMentionCount
             )
             .tag(AppModel.Destination.channel(channel.id))
             .contextMenu { channelMenu(channel) }
         }
+    }
+
+    /// Lines a collapsed forum's unread topics up with the rows it shows when open.
+    private static let collapsedTopicIndent: CGFloat = 16
+
+    private func unreadTopics(in channel: ChannelSummary) -> [TopicSummary] {
+        let generalChat = model.generalChatTopic(inChannel: channel.id)
+        return (model.recentTopics[channel.id] ?? [])
+            .filter { $0.unreadCount > 0 && $0.name != generalChat }
     }
 
     @ViewBuilder
@@ -538,6 +555,38 @@ struct MacDMRow: View {
     }
 }
 
+private struct MacTopicRow: View {
+    let topic: TopicSummary
+    let channel: ChannelSummary
+    let groupID: String?
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        MacSidebarRow(
+            title: topic.name.isEmpty ? "general chat" : topic.name,
+            unread: topic.unreadCount
+        )
+        .tag(AppModel.Destination.topic(
+            channelID: channel.id, name: topic.name, channelName: channel.name
+        ))
+        .contextMenu {
+            Button("Mark as Read") {
+                Task {
+                    await model.markConversationRead(.topic(
+                        channelID: channel.id, name: topic.name, channelName: channel.name
+                    ))
+                }
+            }
+            .disabled(topic.unreadCount == 0)
+            Button("Promote to Sidebar") {
+                model.promote(topic: topic.name, inChannel: channel.id, toGroup: groupID)
+            }
+            NotificationLevelMenu.topic(topic.name, inChannel: channel.id, model: model)
+        }
+    }
+}
+
 /// The topics under one forum channel, nested in the sidebar rather than pushed onto a
 /// second screen. Only the most recent few: the channel's own page lists them all.
 private struct MacTopicRows: View {
@@ -561,30 +610,8 @@ private struct MacTopicRows: View {
                     .foregroundStyle(.secondary)
                     .selectionDisabled()
             } else {
-                // The channel's own row is general chat, so it is not listed again here.
-                let generalChat = model.generalChatTopic(inChannel: channel.id)
-                ForEach(topics.filter { $0.name != generalChat }.prefix(Self.shown)) { topic in
-                    MacSidebarRow(
-                        title: topic.name.isEmpty ? "general chat" : topic.name,
-                        unread: topic.unreadCount
-                    )
-                    .tag(AppModel.Destination.topic(
-                        channelID: channel.id, name: topic.name, channelName: channel.name
-                    ))
-                    .contextMenu {
-                        Button("Mark as Read") {
-                            Task {
-                                await model.markConversationRead(.topic(
-                                    channelID: channel.id, name: topic.name, channelName: channel.name
-                                ))
-                            }
-                        }
-                        .disabled(topic.unreadCount == 0)
-                        Button("Promote to Sidebar") {
-                            model.promote(topic: topic.name, inChannel: channel.id, toGroup: groupID)
-                        }
-                        NotificationLevelMenu.topic(topic.name, inChannel: channel.id, model: model)
-                    }
+                ForEach(shownTopics) { topic in
+                    MacTopicRow(topic: topic, channel: channel, groupID: groupID)
                 }
                 if topics.count > Self.shown {
                     Button {
@@ -600,6 +627,15 @@ private struct MacTopicRows: View {
             }
         }
         .task(id: channel.id) { await observe() }
+    }
+
+    /// The most recent few, plus any older topic still unread. The channel's own row is
+    /// general chat, so it is not listed again here.
+    private var shownTopics: [TopicSummary] {
+        let generalChat = model.generalChatTopic(inChannel: channel.id)
+        let listed = topics.filter { $0.name != generalChat }
+        return Array(listed.prefix(Self.shown))
+            + listed.dropFirst(Self.shown).filter { $0.unreadCount > 0 }
     }
 
     private func observe() async {

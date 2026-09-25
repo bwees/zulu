@@ -242,8 +242,16 @@ extension ZuluStore {
                          WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)
                            AND \(TopicMuting.unreadIsNotPromoted)) AS unreadCount,
                        (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND \(TopicMuting.unreadIsVisible)
+                           AND \(TopicMuting.unreadIsNotPromoted)
+                           AND \(GeneralChat.unreadIsGeneralChat)) AS generalChatUnreadCount,
+                       (SELECT COUNT(*) FROM unread u
                          WHERE u.channelID = c.id AND u.isMention = 1
                            AND \(TopicMuting.unreadIsNotPromoted)) AS mentionCount,
+                       (SELECT COUNT(*) FROM unread u
+                         WHERE u.channelID = c.id AND u.isMention = 1
+                           AND \(TopicMuting.unreadIsNotPromoted)
+                           AND \(GeneralChat.unreadIsGeneralChat)) AS generalChatMentionCount,
                        c.position
                   FROM channel c
                  WHERE c.hidden = 1

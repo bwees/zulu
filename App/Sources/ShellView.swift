@@ -348,18 +348,18 @@ struct ShellView: View {
             setOpen(false)
         } label: {
             HStack(spacing: 7) {
-                UnreadDot(visible: channel.unreadCount > 0)
+                UnreadDot(visible: channel.rowUnreadCount > 0)
                 ChannelIcon(
                     isForum: channel.rendersAsForum, restricted: channel.isRestricted, size: 15
                 )
-                .foregroundStyle(channel.unreadCount > 0 ? Color.primary : SidebarTone.readIcon)
+                .foregroundStyle(channel.rowUnreadCount > 0 ? Color.primary : SidebarTone.readIcon)
                 .frame(width: 22, alignment: .leading)
                 Text(channel.name)
-                    .font(.subheadline.weight(channel.unreadCount > 0 ? .semibold : .medium))
-                    .foregroundStyle(channel.unreadCount > 0 ? Color.primary : SidebarTone.readTitle)
+                    .font(.subheadline.weight(channel.rowUnreadCount > 0 ? .semibold : .medium))
+                    .foregroundStyle(channel.rowUnreadCount > 0 ? Color.primary : SidebarTone.readTitle)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Badge(count: channel.mentionCount, mention: true)
+                Badge(count: channel.rowMentionCount, mention: true)
             }
             .padding(.horizontal, 8)
             .frame(height: 34)
