@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/slop-place/zulu/compare/zulu-v1.5.1...zulu-v1.5.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* scroll to bottom button showing ([c361473](https://github.com/slop-place/zulu/commit/c361473bfbeac6dcf28f999101de64765c47db3d))
+
 ## [1.5.1](https://github.com/slop-place/zulu/compare/zulu-v1.5.0...zulu-v1.5.1) (2026-09-25)
 
 
