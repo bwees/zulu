@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0](https://github.com/slop-place/zulu/compare/zulu-v1.4.0...zulu-v1.5.0) (2026-09-25)
+
+
+### Features
+
+* **api:** send and receive typing notifications ([9b1ae6a](https://github.com/slop-place/zulu/commit/9b1ae6a912569303d611f3af119949ef5b51c126))
+* **api:** tag sends with queue and local id and read it back on the echo ([cd5294c](https://github.com/slop-place/zulu/commit/cd5294c51eef339d65541f5c6e8795990ad6be0d))
+* **app:** add typing indicators, optimistic send, notification level menus, open at first unread and new unread styling ([13bf024](https://github.com/slop-place/zulu/commit/13bf024718fec761a080b7a184fe8691b1b802c0))
+* **compose:** add outbox ledger and per-conversation draft store ([d96d691](https://github.com/slop-place/zulu/commit/d96d691ce0222693e3e31ddac4b471ff03ca1766))
+* **store:** store notification levels for topics, channels and groups ([bf04d8f](https://github.com/slop-place/zulu/commit/bf04d8f424516a0fbf68a5e9b44fdb782422571a))
+
+
+### Bug Fixes
+
+* **app:** steady chat scrolling, fixed typing line, sent-state outbox, image caching and saved drafts ([9ca14b7](https://github.com/slop-place/zulu/commit/9ca14b7b4ab4b3eb5b77f1dbe6dcea1204b2f8d3))
+* **app:** stop crash when opening a tapped notification ([b1688fb](https://github.com/slop-place/zulu/commit/b1688fbf9b1e55a3d6ce6e6bae015dff30a34745))
+* **app:** stop sync bursts from rebuilding the message list and looping mac layout ([f61ace0](https://github.com/slop-place/zulu/commit/f61ace01f2428c99ee1f53da1667fde49ae2ec6c))
+* **mac:** allow pasting images into the composer ([bb17fe9](https://github.com/slop-place/zulu/commit/bb17fe91183a0448e30b032f74fa0aab3fda1a4b))
+* **mac:** keep running in the background when the window is closed ([9b58c05](https://github.com/slop-place/zulu/commit/9b58c058fc56822f5e462f1db66cb1ba54d26bdb))
+* **markup:** follow html whitespace rules so line breaks are not doubled ([b8fda7a](https://github.com/slop-place/zulu/commit/b8fda7a05d3c0f20497e8b5976f31d4d63e42741))
+* **notifications:** let the channel level win over topics zulip followed on its own ([8e31b05](https://github.com/slop-place/zulu/commit/8e31b05f56263125e95a2d52ff3f1ee3370ce36a))
+* **store:** count promoted topic unreads on the topic, not its channel ([fa9819f](https://github.com/slop-place/zulu/commit/fa9819f73a4df5b33522163ff62b70577386d15d))
+
 ## [1.4.0](https://github.com/slop-place/zulu/compare/zulu-v1.3.0...zulu-v1.4.0) (2026-09-24)
 
 
