@@ -274,6 +274,7 @@ public final class ZuluStore: Sendable {
                 "promotedTopic", "channelGroupMember", "channelGroup",
                 "submessage", "reaction", "message", "topic", "channel", "user", "syncState", "unread",
                 "realmEmoji", "serverEmojiData", "userGroup", "channelSubscriber", "mutedTopic", "topicPolicy",
+                "chosenFollow",
             ] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }

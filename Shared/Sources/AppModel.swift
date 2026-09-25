@@ -848,13 +848,15 @@ extension AppModel {
     /// Written locally first so a muted topic leaves the list at once. The server's own
     /// `user_topic` event confirms it, and a refusal puts it back.
     func setNotificationLevel(_ level: NotificationLevel?, forTopic topic: String, inChannel channelID: Int) async {
-        let previous = notificationLevel(forTopic: topic, inChannel: channelID)
-        let policy = level?.topicPolicy ?? .inherit
-        try? store?.setTopicPolicy(policy, topic: topic, inChannel: channelID)
+        guard let store else { return }
+        let previousPolicy = (try? store.topicPolicy(forTopic: topic, inChannel: channelID)) ?? .inherit
+        let previouslyChosen = (try? store.isChosenFollow(topic: topic, inChannel: channelID)) ?? false
+        try? store.setTopicLevel(level, topic: topic, inChannel: channelID)
         do {
-            try await client?.setTopicVisibility(policy, topic: topic, inChannel: channelID)
+            try await client?.setTopicVisibility(level?.topicPolicy ?? .inherit, topic: topic, inChannel: channelID)
         } catch {
-            try? store?.setTopicPolicy(previous?.topicPolicy ?? .inherit, topic: topic, inChannel: channelID)
+            try? store.setTopicPolicy(previousPolicy, topic: topic, inChannel: channelID)
+            try? store.setChosenFollow(previouslyChosen, topic: topic, inChannel: channelID)
         }
     }
 

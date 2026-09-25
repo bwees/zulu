@@ -27,12 +27,17 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
     private func arrived(_ message: ZulipMessage) {
         guard let model, let selfID = model.selfUserID, message.sender_id != selfID else { return }
         let defaults = UserDefaults.standard
-        let wantsDMs = defaults.object(forKey: Self.dmsKey) as? Bool ?? true
-        let wantsMentions = defaults.object(forKey: Self.mentionsKey) as? Bool ?? true
+        let rule = BannerRule(
+            directMessages: defaults.object(forKey: Self.dmsKey) as? Bool ?? true,
+            mentions: defaults.object(forKey: Self.mentionsKey) as? Bool ?? true
+        )
 
         let isDirect = !message.isChannelMessage
         let level = message.stream_id.map { model.effectiveNotificationLevel(forTopic: message.subject, inChannel: $0) }
-        guard (isDirect && wantsDMs) || (message.isMentioned && wantsMentions) || level == .all else { return }
+        guard rule.allows(
+            isDirect: isDirect, isMentioned: message.isMentioned,
+            isPersonallyMentioned: message.isPersonallyMentioned, level: level
+        ) else { return }
 
         let destination: AppModel.Destination
         let subtitle: String
@@ -42,12 +47,6 @@ final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
             subtitle = message.dmParticipants.count > 2 ? "Group direct message" : ""
         } else {
             guard let channelID = message.stream_id else { return }
-            // Zulip still delivers a personal mention from a muted channel or topic, and a
-            // topic set to Mentions Only hears them even inside a muted channel.
-            if !message.isPersonallyMentioned,
-               level == .muted {
-                return
-            }
             let channelName = model.channel(channelID)?.name ?? message.channelName ?? ""
             destination = .topic(channelID: channelID, name: message.subject, channelName: channelName)
             subtitle = "#\(channelName) › \(message.subject.isEmpty ? "general chat" : message.subject)"
