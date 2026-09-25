@@ -24,7 +24,7 @@ final class EmojiCatalogueLoader {
         guard let store, observed !== store else { return }
         observed = store
         catalogue = .empty
-        observer = store.observeEmojiSources().start(in: store.writer, onError: { _ in }) {
+        observer = store.observeEmojiSources().removeDuplicates().start(in: store.writer, onError: { _ in }) {
             [weak self] sources in
             let table = sources.unicode.flatMap { try? JSONDecoder().decode(ServerEmojiData.self, from: $0) }
             self?.catalogue = EmojiCatalogue(

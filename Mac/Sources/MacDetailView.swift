@@ -96,7 +96,7 @@ struct MacChatChannelView: View {
               let observation = model.topics(inChannel: channel.id)
         else { return }
         do {
-            for try await rows in observation.values(in: writer) {
+            for try await rows in observation.removeDuplicates().values(in: writer) {
                 topics = rows
                 loaded = true
             }
@@ -235,7 +235,7 @@ struct MacTopicListView: View {
               let observation = model.topics(inChannel: channel.id)
         else { return }
         do {
-            for try await rows in observation.values(in: writer) {
+            for try await rows in observation.removeDuplicates().values(in: writer) {
                 topics = rows
                 loaded = true
             }

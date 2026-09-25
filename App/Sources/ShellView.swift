@@ -322,13 +322,13 @@ struct ShellView: View {
             promotedTask?.cancel()
             promotedTask = Task {
                 do {
-                    for try await rows in promoted.values(in: writer) { visiblePromoted = rows }
+                    for try await rows in promoted.removeDuplicates().values(in: writer) { visiblePromoted = rows }
                 } catch {}
             }
         }
         guard let observation = model.channelObservation(inGroup: groupID) else { return }
         do {
-            for try await rows in observation.values(in: writer) {
+            for try await rows in observation.removeDuplicates().values(in: writer) {
                 visibleChannels = rows
             }
         } catch {

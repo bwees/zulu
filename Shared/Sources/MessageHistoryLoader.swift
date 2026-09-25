@@ -69,7 +69,7 @@ final class MessageHistoryLoader {
 
         observationTask = Task { [weak self] in
             do {
-                for try await rows in observation.values(in: writer) {
+                for try await rows in observation.removeDuplicates().values(in: writer) {
                     guard let self else { return }
                     if !isReady {
                         firstUnreadID = rows.first { !$0.isRead }?.id
@@ -147,7 +147,7 @@ extension MessageHistoryLoader {
         guard let writer = model.databaseWriter, let store = model.storeForReading else { return }
         reactionTask = Task { [weak self] in
             do {
-                for try await records in store.observeAllReactions().values(in: writer) {
+                for try await records in store.observeAllReactions().removeDuplicates().values(in: writer) {
                     guard let self else { return }
                     let byMessage = Dictionary(grouping: records, by: \.messageID)
                     reactions = byMessage.mapValues {

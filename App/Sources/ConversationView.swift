@@ -14,18 +14,11 @@ struct ConversationView: View {
 
     @State private var loader: MessageHistoryLoader?
     @State private var readTracker: ReadTracker?
-    /// Holds the message SwiftUI keeps pinned across data changes. Never written during a
-    /// prepend — that is precisely what makes older messages arrive without a jump.
-    @State private var scroll = ScrollPosition(idType: Int.self)
-    /// True between asking to follow the newest message and landing there, so the jump
-    /// button does not flash while the list catches up.
-    @State private var following = false
-    @State private var atBottom = true
 
     var body: some View {
         Group {
             if let loader, loader.isReady {
-                conversation(loader)
+                ConversationHistory(source: source, loader: loader, readTracker: readTracker)
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -73,7 +66,48 @@ struct ConversationView: View {
         }
     }
 
-    private func conversation(_ loader: MessageHistoryLoader) -> some View {
+    private var forumChannel: ChannelSummary? {
+        guard case .topic(let channelID, _, _) = source,
+              let channel = model.channel(channelID), channel.rendersAsForum
+        else { return nil }
+        return channel
+    }
+
+    private var title: String {
+        switch source {
+        case .topic(_, let name, _): name.isEmpty ? "general chat" : name
+        case .dm(let key): model.title(forDM: key)
+        }
+    }
+
+    private var placeholder: String {
+        switch source {
+        case .topic(_, let name, _): "Message \(name.isEmpty ? "general chat" : name)"
+        case .dm(let key): "Message \(model.title(forDM: key))"
+        }
+    }
+}
+
+
+/// The message list, apart from the toolbar and title around it. Those read sidebar data
+/// that changes on every sync; in the same view, each of those changes rebuilt the whole
+/// list.
+private struct ConversationHistory: View {
+    let source: ConversationView.Source
+    let loader: MessageHistoryLoader
+    let readTracker: ReadTracker?
+
+    @Environment(AppModel.self) private var model
+
+    /// Holds the message SwiftUI keeps pinned across data changes. Never written during a
+    /// prepend — that is precisely what makes older messages arrive without a jump.
+    @State private var scroll = ScrollPosition(idType: Int.self)
+    /// True between asking to follow the newest message and landing there, so the jump
+    /// button does not flash while the list catches up.
+    @State private var following = false
+    @State private var atBottom = true
+
+    var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Outside the ForEach and deliberately unidentified: a row that appears and
@@ -186,26 +220,4 @@ struct ConversationView: View {
         following = true
         scroll.scrollTo(edge: .bottom)
     }
-
-    private var forumChannel: ChannelSummary? {
-        guard case .topic(let channelID, _, _) = source,
-              let channel = model.channel(channelID), channel.rendersAsForum
-        else { return nil }
-        return channel
-    }
-
-    private var title: String {
-        switch source {
-        case .topic(_, let name, _): name.isEmpty ? "general chat" : name
-        case .dm(let key): model.title(forDM: key)
-        }
-    }
-
-    private var placeholder: String {
-        switch source {
-        case .topic(_, let name, _): "Message \(name.isEmpty ? "general chat" : name)"
-        case .dm(let key): "Message \(model.title(forDM: key))"
-        }
-    }
 }
-

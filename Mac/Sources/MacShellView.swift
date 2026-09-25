@@ -419,13 +419,13 @@ struct MacShellView: View {
         if let observation = model.promotedTopicObservation(inGroup: groupID) {
             promotedTask = Task {
                 do {
-                    for try await rows in observation.values(in: writer) { promoted = rows }
+                    for try await rows in observation.removeDuplicates().values(in: writer) { promoted = rows }
                 } catch {}
             }
         }
         guard let observation = model.channelObservation(inGroup: groupID) else { return }
         do {
-            for try await rows in observation.values(in: writer) { channels = rows }
+            for try await rows in observation.removeDuplicates().values(in: writer) { channels = rows }
         } catch {
             // Observation ends when the section changes; nothing to recover.
         }
@@ -607,7 +607,7 @@ private struct MacTopicRows: View {
               let observation = model.topics(inChannel: channel.id)
         else { return }
         do {
-            for try await rows in observation.values(in: writer) {
+            for try await rows in observation.removeDuplicates().values(in: writer) {
                 topics = rows
                 loaded = true
             }

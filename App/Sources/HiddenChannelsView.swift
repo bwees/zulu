@@ -55,7 +55,7 @@ struct HiddenChannelsView: View {
               let observation = model.hiddenChannelObservation
         else { return }
         do {
-            for try await rows in observation.values(in: writer) { channels = rows }
+            for try await rows in observation.removeDuplicates().values(in: writer) { channels = rows }
         } catch {
             // Ends with the sheet; nothing to recover.
         }

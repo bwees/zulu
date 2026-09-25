@@ -133,22 +133,22 @@ final class AppModel {
     private func observe(_ store: ZuluStore) {
         observers.removeAll()
         observers.append(
-            store.observeChannels().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+            store.observeChannels().removeDuplicates().start(in: store.writer, onError: { _ in }) { [weak self] rows in
                 self?.allChannels = rows
             }
         )
         observers.append(
-            store.observeGroups().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+            store.observeGroups().removeDuplicates().start(in: store.writer, onError: { _ in }) { [weak self] rows in
                 self?.groups = rows
             }
         )
         observers.append(
-            store.observeDMs().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+            store.observeDMs().removeDuplicates().start(in: store.writer, onError: { _ in }) { [weak self] rows in
                 self?.dms = rows
             }
         )
         observers.append(
-            store.observeUsers().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+            store.observeUsers().removeDuplicates().start(in: store.writer, onError: { _ in }) { [weak self] rows in
                 self?.users = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
             }
         )
@@ -638,19 +638,19 @@ extension AppModel {
         sidebarObserversStarted = true
 
         observers.append(
-            store.observeChannels(inGroup: nil).start(in: store.writer, onError: { _ in }) {
+            store.observeChannels(inGroup: nil).removeDuplicates().start(in: store.writer, onError: { _ in }) {
                 [weak self] rows in
                 self?.unfiledChannels = rows
             }
         )
         observers.append(
-            store.observePromotedTopics(inGroup: nil).start(in: store.writer, onError: { _ in }) {
+            store.observePromotedTopics(inGroup: nil).removeDuplicates().start(in: store.writer, onError: { _ in }) {
                 [weak self] rows in
                 self?.unfiledPromoted = rows
             }
         )
         observers.append(
-            store.observeRecentTopics().start(in: store.writer, onError: { _ in }) { [weak self] rows in
+            store.observeRecentTopics().removeDuplicates().start(in: store.writer, onError: { _ in }) { [weak self] rows in
                 self?.recentTopics = Dictionary(grouping: rows, by: \.channelID)
             }
         )

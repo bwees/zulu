@@ -204,7 +204,7 @@ final class PollController {
               let observation = model.pollObservation(forMessage: messageID)
         else { return }
         do {
-            for try await rows in observation.values(in: writer) {
+            for try await rows in observation.removeDuplicates().values(in: writer) {
                 log = rows.map(\.pollSubmessage)
                 // Anything newer than the baseline means the server has spoken since, so
                 // the guesses made here have either landed or been overtaken.

@@ -12,16 +12,13 @@ struct MacConversationView: View {
 
     @State private var loader: MessageHistoryLoader?
     @State private var readTracker: ReadTracker?
-    @State private var scroll = ScrollPosition(idType: Int.self)
-    @State private var atBottom = true
-    @State private var following = false
     @State private var quickReactions: [QuickReaction] = []
     @State private var dropTargeted = false
 
     var body: some View {
         Group {
             if let loader, loader.isReady {
-                history(loader)
+                MacConversationHistory(source: source, loader: loader, readTracker: readTracker, title: title)
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -101,105 +98,6 @@ struct MacConversationView: View {
             loader?.stop()
             Task { await readTracker?.flushNow() }
         }
-    }
-
-    private func history(_ loader: MessageHistoryLoader) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if loader.isLoadingOlder {
-                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).frame(height: 36)
-                } else if !loader.hasMoreOlder, !loader.messages.isEmpty {
-                    MacConversationStart(title: title)
-                }
-                ForEach(loader.grouped) { entry in
-                    VStack(alignment: .leading, spacing: 0) {
-                        if entry.message.id == loader.firstUnreadID {
-                            UnreadDivider().padding(.top, 10)
-                        }
-                        MessageRow(
-                            message: entry.message,
-                            startsGroup: entry.startsGroup,
-                            reactions: loader.reactions[entry.message.id] ?? []
-                        )
-                        .padding(.top, entry.startsGroup ? 12 : 1)
-                        .padding(.bottom, 1)
-                        .macMessageActions(entry.message, in: source)
-                    }
-                    .onAppear { readTracker?.sawMessage(id: entry.message.id) }
-                    .id(entry.message.id)
-                }
-
-                ForEach(model.pendingEntries(in: source, after: loader.messages)) { pending in
-                    PendingMessageRow(message: pending.entry, startsGroup: pending.startsGroup)
-                        .padding(.top, pending.startsGroup ? 12 : 1)
-                        .padding(.bottom, 1)
-                }
-            }
-            .scrollTargetLayout()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        // Holds the bottom row, as the phone does, so a taller composer or an image
-        // loading above leaves the newest messages where they were.
-        .scrollPosition($scroll, anchor: .bottom)
-        .defaultScrollAnchor(.bottom)
-        .onAppear {
-            if let firstUnread = loader.firstUnreadID { scroll.scrollTo(id: firstUnread, anchor: .top) }
-        }
-        .onScrollPhaseChange { _, phase in
-            if phase == .interacting { following = false }
-            loader.noteScrollPhase(phase)
-        }
-        .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
-            loader.noteVisible(visible)
-        }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            ConversationScroll.isNearBottom(geometry)
-        } action: { _, isNearBottom in
-            atBottom = isNearBottom
-            if isNearBottom { following = false }
-            if isNearBottom {
-                Task { await model.markConversationRead(source) }
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            Group {
-                if !atBottom, !following {
-                    Button {
-                        withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
-                    } label: {
-                        Image(systemName: "arrow.down")
-                            .font(.body.weight(.semibold))
-                            .frame(width: 30, height: 30)
-                            .background(.regularMaterial, in: Circle())
-                            .overlay(Circle().strokeBorder(.quaternary))
-                            .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 12)
-                    .transition(.scale.combined(with: .opacity))
-                    .help("Jump to newest")
-                }
-            }
-            .animation(.snappy(duration: 0.2), value: atBottom || following)
-        }
-        .onChange(of: loader.messages.last?.id) { _, newest in
-            guard atBottom || following, newest != nil else { return }
-            followNewest()
-        }
-        // Sending always shows what was sent, even from partway up the history.
-        .onChange(of: model.outbox.count(in: source)) { old, new in
-            guard new > old else { return }
-            followNewest()
-        }
-    }
-
-    /// Without animation, so the jump lands in the same frame as the message.
-    private func followNewest() {
-        following = true
-        scroll.scrollTo(edge: .bottom)
     }
 
     private var title: String {
@@ -325,5 +223,120 @@ extension AppModel {
                 ComposerInbox.shared.deliver(markdown + "\n", to: conversation)
             }
         }
+    }
+}
+
+/// The message list, apart from the toolbar and title around it. Those read sidebar data
+/// that changes on every sync; in the same view, each of those changes rebuilt the whole
+/// list, and a sync after waking rebuilt it once per channel.
+private struct MacConversationHistory: View {
+    let source: ConversationSource
+    let loader: MessageHistoryLoader
+    let readTracker: ReadTracker?
+    let title: String
+
+    @Environment(AppModel.self) private var model
+
+    @State private var scroll = ScrollPosition(idType: Int.self)
+    @State private var atBottom = true
+    @State private var following = false
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if loader.isLoadingOlder {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).frame(height: 36)
+                } else if !loader.hasMoreOlder, !loader.messages.isEmpty {
+                    MacConversationStart(title: title)
+                }
+                ForEach(loader.grouped) { entry in
+                    VStack(alignment: .leading, spacing: 0) {
+                        if entry.message.id == loader.firstUnreadID {
+                            UnreadDivider().padding(.top, 10)
+                        }
+                        MessageRow(
+                            message: entry.message,
+                            startsGroup: entry.startsGroup,
+                            reactions: loader.reactions[entry.message.id] ?? []
+                        )
+                        .padding(.top, entry.startsGroup ? 12 : 1)
+                        .padding(.bottom, 1)
+                        .macMessageActions(entry.message, in: source)
+                    }
+                    .onAppear { readTracker?.sawMessage(id: entry.message.id) }
+                    .id(entry.message.id)
+                }
+
+                ForEach(model.pendingEntries(in: source, after: loader.messages)) { pending in
+                    PendingMessageRow(message: pending.entry, startsGroup: pending.startsGroup)
+                        .padding(.top, pending.startsGroup ? 12 : 1)
+                        .padding(.bottom, 1)
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Holds the bottom row, as the phone does, so a taller composer or an image
+        // loading above leaves the newest messages where they were.
+        .scrollPosition($scroll, anchor: .bottom)
+        .defaultScrollAnchor(.bottom)
+        .onAppear {
+            if let firstUnread = loader.firstUnreadID { scroll.scrollTo(id: firstUnread, anchor: .top) }
+        }
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting { following = false }
+            loader.noteScrollPhase(phase)
+        }
+        .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
+            loader.noteVisible(visible)
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            ConversationScroll.isNearBottom(geometry)
+        } action: { _, isNearBottom in
+            atBottom = isNearBottom
+            if isNearBottom { following = false }
+            if isNearBottom {
+                Task { await model.markConversationRead(source) }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Group {
+                if !atBottom, !following {
+                    Button {
+                        withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 30, height: 30)
+                            .background(.regularMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(.quaternary))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 12)
+                    .transition(.scale.combined(with: .opacity))
+                    .help("Jump to newest")
+                }
+            }
+            .animation(.snappy(duration: 0.2), value: atBottom || following)
+        }
+        .onChange(of: loader.messages.last?.id) { _, newest in
+            guard atBottom || following, newest != nil else { return }
+            followNewest()
+        }
+        // Sending always shows what was sent, even from partway up the history.
+        .onChange(of: model.outbox.count(in: source)) { old, new in
+            guard new > old else { return }
+            followNewest()
+        }
+    }
+
+    /// Without animation, so the jump lands in the same frame as the message.
+    private func followNewest() {
+        following = true
+        scroll.scrollTo(edge: .bottom)
     }
 }

@@ -75,7 +75,7 @@ struct ChannelView: View {
             return
         }
         do {
-            for try await rows in observation.values(in: writer) {
+            for try await rows in observation.removeDuplicates().values(in: writer) {
                 topics = rows
             }
         } catch {

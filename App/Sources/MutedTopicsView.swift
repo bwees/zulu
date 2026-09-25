@@ -49,7 +49,7 @@ struct MutedTopicsView: View {
               let observation = model.mutedTopicObservation(inChannel: channel.id)
         else { return }
         do {
-            for try await rows in observation.values(in: writer) { topics = rows }
+            for try await rows in observation.removeDuplicates().values(in: writer) { topics = rows }
         } catch {
             // Ends with the sheet; nothing to recover.
         }
