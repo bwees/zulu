@@ -170,7 +170,7 @@ enum ConversationScroll {
     /// scrolled all the way down: the composer sits over the bottom of the content.
     static func isNearBottom(_ geometry: ScrollGeometry) -> Bool {
         let end = geometry.contentSize.height + geometry.contentInsets.bottom
-        let fromBottom = end - (geometry.contentOffset.y + geometry.containerSize.height)
+        let fromBottom = end - geometry.visibleRect.maxY
         return fromBottom < nearBottomDistance
     }
 }
