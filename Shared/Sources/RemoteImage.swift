@@ -14,6 +14,9 @@ struct RemoteImage: View {
     @Environment(AppModel.self) private var model
     #if os(macOS)
     @Environment(MacUIState.self) private var ui
+    #else
+    @State private var viewing: ImageViewerItem?
+    @Namespace private var viewerTransition
     #endif
     @State private var image: Image?
     @State private var failed = false
@@ -57,9 +60,17 @@ struct RemoteImage: View {
         }
         .onTapGesture {
             guard image != nil else { return }
-            ui.viewingImage = MacImageViewerItem(
-                preview: path, fullSize: fullSize, alt: alt, aspectRatio: aspectRatio
-            )
+            ui.viewingImage = viewerItem
+        }
+        #else
+        .matchedTransitionSource(id: path, in: viewerTransition)
+        .onTapGesture {
+            guard image != nil else { return }
+            viewing = viewerItem
+        }
+        .fullScreenCover(item: $viewing) { item in
+            ImageViewer(item: item)
+                .navigationTransition(.zoom(sourceID: path, in: viewerTransition))
         }
         #endif
         .task(id: path) {
@@ -75,6 +86,10 @@ struct RemoteImage: View {
 }
 
 extension RemoteImage {
+    private var viewerItem: ImageViewerItem {
+        ImageViewerItem(preview: path, fullSize: fullSize, alt: alt, aspectRatio: aspectRatio)
+    }
+
     /// The full-size upload, resolved against the realm since the server hands out a
     /// realm-relative path. `nil` when the message carried no link, in which case there is
     /// nothing bigger to see.

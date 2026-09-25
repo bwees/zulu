@@ -1,29 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// An image a message showed inline, now asked for at full size.
-struct MacImageViewerItem: Identifiable, Equatable {
-    let preview: String
-    let fullSize: String?
-    let alt: String?
-    let aspectRatio: Double?
-
-    var id: String { preview }
-
-    /// The original where the message linked to one, else the preview itself.
-    var source: String {
-        if let fullSize, !fullSize.isEmpty { return fullSize }
-        return preview
-    }
-}
-
 /// The image over the whole window, at the size it was uploaded, scaled to fit.
 ///
 /// Drawn in the window rather than handed to the browser: the browser has to be signed
 /// in to show an upload at all, and a picture someone just posted is not worth leaving
 /// the conversation for. Escape, the close button, or a click on the backdrop dismisses.
 struct MacImageViewer: View {
-    let item: MacImageViewerItem
+    let item: ImageViewerItem
     let dismiss: () -> Void
 
     @Environment(AppModel.self) private var model
