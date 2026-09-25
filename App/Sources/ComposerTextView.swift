@@ -54,9 +54,12 @@ struct ComposerTextView: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: ComposerTextView
-        var focusToken = -1
+        var focusToken: Int
 
-        init(parent: ComposerTextView) { self.parent = parent }
+        init(parent: ComposerTextView) {
+            self.parent = parent
+            focusToken = parent.focusToken
+        }
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
