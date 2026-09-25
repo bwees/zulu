@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.1](https://github.com/slop-place/zulu/compare/zulu-v1.5.0...zulu-v1.5.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **compose:** only raise the keyboard when the compose bar is tapped ([435927f](https://github.com/slop-place/zulu/commit/435927f54c9c61c52dc63bb3a0204ce477cfb71b))
+* **sidebar:** light a forum's row for its general chat only and always list unread topics ([0434f6d](https://github.com/slop-place/zulu/commit/0434f6d95b9ddef834a886959ad038f245a503bd))
+
 ## [1.5.0](https://github.com/slop-place/zulu/compare/zulu-v1.4.0...zulu-v1.5.0) (2026-09-25)
 
 
