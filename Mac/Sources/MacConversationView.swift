@@ -31,6 +31,7 @@ struct MacConversationView: View {
             // Behind the typing line too, or history scrolled under it shows through.
             .background(.bar)
         }
+        .macAutocompleteBox()
         .overlay {
             if dropTargeted {
                 MacDropHint()

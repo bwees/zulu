@@ -24,7 +24,7 @@ public enum ZulipEvent: Sendable {
     /// `localID` is set only on the queue that sent the message, and only when the send
     /// carried one.
     case message(ZulipMessage, localID: String?)
-    case updateMessage(id: Int, renderedContent: String?)
+    case updateMessage(id: Int, renderedContent: String?, editedAt: Int?)
     case deleteMessage(ids: [Int])
     case flags(operation: String, flag: String, messageIDs: [Int])
     case reaction(added: Bool, messageID: Int, reaction: Reaction)
@@ -65,6 +65,7 @@ struct EventEnvelope: Decodable {
     let message_id: Int?
     let message_ids: [Int]?
     let rendered_content: String?
+    let edit_timestamp: Int?
     let operation: String?
     let op: String?
     let flag: String?
@@ -90,7 +91,9 @@ struct EventEnvelope: Decodable {
         case "message":
             if let message { return .message(message, localID: local_message_id.flatMap(\.value)) }
         case "update_message":
-            if let id = message_id { return .updateMessage(id: id, renderedContent: rendered_content) }
+            if let id = message_id {
+                return .updateMessage(id: id, renderedContent: rendered_content, editedAt: edit_timestamp)
+            }
         case "delete_message":
             return .deleteMessage(ids: message_ids ?? [message_id].compactMap { $0 })
         case "update_message_flags":

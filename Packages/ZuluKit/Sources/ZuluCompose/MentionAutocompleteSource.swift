@@ -184,7 +184,7 @@ public struct MentionAutocompleteSource: AutocompleteSource {
             id: "user:\(person.id)",
             title: person.fullName,
             subtitle: person.isBot ? "Bot" : person.email,
-            icon: person.avatarURL.map { .image($0) } ?? .symbol("person.crop.circle"),
+            icon: person.avatarURL.map { .avatar($0) } ?? .symbol("person.crop.circle"),
             insertion: ComposeMarkup.userMention(
                 fullName: person.fullName,
                 userID: ambiguousNames.contains(person.fullName) ? person.id : nil,

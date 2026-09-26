@@ -74,6 +74,18 @@ public enum MessageMarkup {
         return foldQuotedReplies(blocks)
     }
 
+    /// A message of nothing but emoji, which is drawn large.
+    public static func isEmojiOnly(_ blocks: [MessageBlock]) -> Bool {
+        guard blocks.count == 1, case .paragraph(let spans)? = blocks.first else { return false }
+        let onlyEmoji = spans.allSatisfy { span in
+            span.emojiURL != nil
+                || (span.link == nil && !span.mention && !span.code
+                    && span.text.allSatisfy { $0.isWhitespace || $0.isEmoji })
+        }
+        let anyEmoji = spans.contains { $0.emojiURL != nil || $0.text.contains(where: \.isEmoji) }
+        return onlyEmoji && anyEmoji
+    }
+
     /// Zulip renders quote-and-reply as an attribution paragraph — a silent mention,
     /// a `said` link carrying `/near/<id>` — immediately followed by a blockquote.
     /// Recognising the pair lets the UI draw a one-line reply header instead of
@@ -452,5 +464,18 @@ extension MessageMarkup {
               width > 0, height > 0
         else { return nil }
         return width / height
+    }
+}
+
+private extension Character {
+    /// Digits, `#`, `©` and `™` carry the emoji property too. Everything below this
+    /// codepoint that has it is one of those, unless a variation selector follows.
+    static let firstPictograph: UInt32 = 0x238D
+
+    var isEmoji: Bool {
+        guard let first = unicodeScalars.first else { return false }
+        return first.properties.isEmojiPresentation
+            || (first.properties.isEmoji
+                && (unicodeScalars.count > 1 || first.value >= Self.firstPictograph))
     }
 }

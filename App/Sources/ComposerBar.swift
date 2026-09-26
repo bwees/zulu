@@ -25,11 +25,14 @@ struct ComposerBar: View {
     @State private var autocomplete: ComposeAutocompleteController?
     @State private var focusToken = 0
     @State private var typingSender: TypingSender?
+    @State private var editMode: ComposerEditMode?
 
     /// Every icon control in the bar is the same circle, so the row reads as one piece.
     private static let controlSize: CGFloat = 26
     /// Half the field's one-line height.
     private static let fieldCornerRadius: CGFloat = 20
+
+    private var isEditing: Bool { editMode?.isEditing == true }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -44,7 +47,9 @@ struct ComposerBar: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let replyingTo {
+            if isEditing {
+                editBanner
+            } else if let replyingTo {
                 replyBanner(replyingTo)
             }
 
@@ -66,15 +71,15 @@ struct ComposerBar: View {
                 field
 
                 Button {
-                    send()
+                    isEditing ? saveEdit() : send()
                 } label: {
-                    Image(systemName: "arrow.up")
+                    Image(systemName: isEditing ? "checkmark" : "arrow.up")
                         .font(.body.weight(.semibold))
                         .frame(width: Self.controlSize, height: Self.controlSize)
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editMode?.isSaving == true)
             }
         }
         .padding(.horizontal, 12)
@@ -92,6 +97,9 @@ struct ComposerBar: View {
         }
         .task(id: source) {
             typingSender?.stop()
+            // What was being edited belongs to the conversation being left.
+            if isEditing { draft = "" }
+            editMode = ComposerEditMode(model: model)
             restoreDraft()
             typingSender = TypingSender { [model, source] op in await model.sendTyping(op, in: source) }
             EmojiCatalogueLoader.shared.start(store: model.storeForReading)
@@ -106,9 +114,9 @@ struct ComposerBar: View {
         }
         .onChange(of: draft) {
             autocomplete?.update(draft: draft)
-            model.saveDraft(draft, replyingTo: replyingTo, in: source)
+            saveDraft()
         }
-        .onChange(of: replyingTo) { model.saveDraft(draft, replyingTo: replyingTo, in: source) }
+        .onChange(of: replyingTo) { saveDraft() }
         .onDisappear { typingSender?.stop() }
         .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
         .sheet(isPresented: $showEmoji) { EmojiPicker { insert($0) } }
@@ -169,6 +177,37 @@ struct ComposerBar: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    private var editBanner: some View {
+        HStack(spacing: 8) {
+            Capsule().fill(Color.accentColor).frame(width: 3)
+            Label("Editing message", systemImage: "pencil")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .labelStyle(.titleAndIcon)
+            Spacer(minLength: 0)
+            if editMode?.isSaving == true {
+                ProgressView().controlSize(.small)
+            }
+            Button {
+                cancelEdit()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel edit")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .padding(.vertical, 6)
+        .frame(height: 44)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
     private var field: some View {
         HStack(alignment: .bottom, spacing: 6) {
             ComposerTextView(
@@ -202,6 +241,9 @@ struct ComposerBar: View {
     /// after starting to type does not throw the typing away.
     private func takeDelivery() {
         let key = ConversationKey.of(source)
+        if let edit = ComposerInbox.shared.takeEdit(for: key) {
+            beginEdit(edit)
+        }
         if let reply = ComposerInbox.shared.takeReply(for: key) {
             withAnimation(.snappy(duration: 0.24)) { replyingTo = reply }
             focusToken += 1
@@ -218,6 +260,45 @@ struct ComposerBar: View {
     private func insert(_ shortcode: String) {
         if let last = draft.last, last != " ", last != "\n" { draft += " " }
         draft += shortcode
+    }
+
+    /// While editing, the draft on disk stays whatever was being typed before.
+    private func saveDraft() {
+        guard !isEditing else { return }
+        model.saveDraft(draft, replyingTo: replyingTo, in: source)
+    }
+
+    // MARK: editing
+
+    private func beginEdit(_ edit: EditDraft) {
+        editMode?.begin(edit, settingAside: draft, reply: replyingTo)
+        sendError = nil
+        withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
+        draft = edit.original
+        focusToken += 1
+    }
+
+    private func cancelEdit() {
+        guard let setAside = editMode?.cancel() else { return }
+        restore(setAside)
+    }
+
+    private func saveEdit() {
+        guard let editMode else { return }
+        Task {
+            switch await editMode.save(draft) {
+            case .success(let setAside):
+                sendError = nil
+                restore(setAside)
+            case .failure(let error):
+                sendError = error.message
+            }
+        }
+    }
+
+    private func restore(_ setAside: ComposerEditMode.SetAside) {
+        withAnimation(.snappy(duration: 0.2)) { replyingTo = setAside.reply }
+        draft = setAside.text
     }
 
     /// Only into an empty composer, so coming back to the conversation never replaces

@@ -21,10 +21,13 @@ private struct MacMessageActions: ViewModifier {
     @State private var hovering = false
     @State private var showingPicker = false
     @State private var controller: MessageActionsController?
+    @State private var confirmingDelete = false
 
     /// The bar stays while its popover is up, or the popover would lose its anchor and
     /// close the moment the pointer moved.
     private var barVisible: Bool { hovering || showingPicker }
+
+    private var isOwn: Bool { model.isOwn(message) }
 
     func body(content: Content) -> some View {
         content
@@ -43,6 +46,13 @@ private struct MacMessageActions: ViewModifier {
             .contextMenu { menu }
             .task(id: message.id) {
                 controller = MessageActionsController(message: message, model: model)
+            }
+            .confirmationDialog("Delete this message?", isPresented: $confirmingDelete) {
+                Button("Delete", role: .destructive) {
+                    Task { _ = await controller?.delete() }
+                }
+            } message: {
+                Text("It is deleted for everyone, and cannot be undone.")
             }
     }
 
@@ -74,9 +84,18 @@ private struct MacMessageActions: ViewModifier {
                 Image(systemName: "arrowshape.turn.up.left")
             }
 
+            if isOwn {
+                barButton(help: "Edit") {
+                    edit()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+            }
+
             Menu {
                 Button("Copy Text") { controller?.copyText() }
                 Button("Copy Link") { controller?.copyLink() }
+                ownActions
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 24, height: 22)
@@ -120,6 +139,21 @@ private struct MacMessageActions: ViewModifier {
         Divider()
         Button("Copy Text") { controller?.copyText() }
         Button("Copy Link") { controller?.copyLink() }
+        ownActions
+    }
+
+    @ViewBuilder
+    private var ownActions: some View {
+        if isOwn {
+            Divider()
+            Button("Edit Message") { edit() }
+            Button("Delete Message…", role: .destructive) { confirmingDelete = true }
+        }
+    }
+
+    private func edit() {
+        Task { _ = await controller?.edit() }
+        ui.requestComposerFocus()
     }
 
     private func reply() {

@@ -276,6 +276,12 @@ struct SuggestionIcon: View {
                 Image(systemName: name).foregroundStyle(.secondary)
             case .image(let path):
                 if let image {
+                    image.resizable().scaledToFit()
+                } else {
+                    Color.clear.task { await load(path) }
+                }
+            case .avatar(let path):
+                if let image {
                     image.resizable().scaledToFit().clipShape(.circle)
                 } else {
                     Color.clear.task { await load(path) }

@@ -267,4 +267,25 @@ struct QuotedReplyTests {
             [InlineSpan(text: "parent\nchild one\nchild two")],
         ])])
     }
+
+    @Test(arguments: [
+        #"<p><span class="emoji emoji-1f600">:grinning:</span></p>"#,
+        #"<p><span class="emoji emoji-1f600">:grinning:</span> <span class="emoji emoji-2764">:heart:</span></p>"#,
+        #"<p><img alt=":bonk:" class="emoji" src="/e/bonk.gif" title="bonk"></p>"#,
+        "<p>❤️</p>",
+    ])
+    func emojiOnlyMessagesAreDrawnLarge(html: String) {
+        #expect(MessageMarkup.isEmojiOnly(MessageMarkup.blocks(from: html)))
+    }
+
+    @Test(arguments: [
+        #"<p>nice <span class="emoji emoji-1f600">:grinning:</span></p>"#,
+        "<p>2024</p>",
+        "<p>#1</p>",
+        #"<p><span class="emoji emoji-1f600">:grinning:</span></p><p><span class="emoji emoji-1f600">:grinning:</span></p>"#,
+        "",
+    ])
+    func anythingElseIsNot(html: String) {
+        #expect(!MessageMarkup.isEmojiOnly(MessageMarkup.blocks(from: html)))
+    }
 }

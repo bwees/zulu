@@ -105,12 +105,20 @@ extension Platform {
     /// The body text's line, top of the tallest letter to the bottom of the lowest. An
     /// inline picture this size, dropped by the descender, sits on the line without
     /// making it taller than its neighbours.
-    static var bodyLine: (height: CGFloat, descender: CGFloat) {
-        #if canImport(UIKit)
-        let font = UIFont.preferredFont(forTextStyle: .body)
-        #else
-        let font = NSFont.preferredFont(forTextStyle: .body)
-        #endif
+    static var bodyLine: (height: CGFloat, descender: CGFloat) { line(of: .body) }
+
+    /// The line of a message that is nothing but emoji, which is drawn at this size.
+    static var emojiOnlyLine: (height: CGFloat, descender: CGFloat) { line(of: .largeTitle) }
+
+    #if canImport(UIKit)
+    private static func line(of style: UIFont.TextStyle) -> (height: CGFloat, descender: CGFloat) {
+        let font = UIFont.preferredFont(forTextStyle: style)
         return (ceil(font.ascender - font.descender), font.descender)
     }
+    #else
+    private static func line(of style: NSFont.TextStyle) -> (height: CGFloat, descender: CGFloat) {
+        let font = NSFont.preferredFont(forTextStyle: style)
+        return (ceil(font.ascender - font.descender), font.descender)
+    }
+    #endif
 }

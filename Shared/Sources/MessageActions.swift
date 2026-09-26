@@ -59,6 +59,12 @@ struct MessageActionsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var controller: MessageActionsController?
     @State private var showingPicker = false
+    @State private var confirmingDelete = false
+
+    private static let rowHeight: CGFloat = 48
+    private static let height: CGFloat = 300
+    /// Room for Edit and Delete, which only your own messages offer.
+    private static let ownHeight = height + rowHeight * 2
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -72,7 +78,7 @@ struct MessageActionsSheet: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(model.isOwn(message) ? Self.ownHeight : Self.height)])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
         .task {
@@ -145,19 +151,37 @@ struct MessageActionsSheet: View {
                 controller.copyLink()
                 dismiss()
             }
+            if controller.isOwn {
+                Divider()
+                row("Edit", "pencil") {
+                    Task { if await controller.edit() { dismiss() } }
+                }
+                Divider()
+                row("Delete", "trash", role: .destructive) { confirmingDelete = true }
+            }
         }
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .confirmationDialog("Delete this message?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                Task { if await controller.delete() { dismiss() } }
+            }
+        } message: {
+            Text("It is deleted for everyone, and cannot be undone.")
+        }
     }
 
-    private func row(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func row(
+        _ title: String, _ symbol: String, role: ButtonRole? = nil, action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
             HStack(spacing: 12) {
                 Image(systemName: symbol).frame(width: 22)
                 Text(title).font(.body)
                 Spacer(minLength: 0)
             }
+            .foregroundStyle(role == .destructive ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
             .padding(.horizontal, 16)
-            .frame(height: 48)
+            .frame(height: Self.rowHeight)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -261,6 +285,19 @@ final class MessageActionsController {
         )
     }
 
+    var isOwn: Bool { model.isOwn(message) }
+
+    /// True once the composer has the message, so the caller knows to get out of its way.
+    func edit() async -> Bool {
+        error = await model.beginEditing(message)
+        return error == nil
+    }
+
+    func delete() async -> Bool {
+        error = await model.delete(message)
+        return error == nil
+    }
+
     func copyText() {
         Platform.copyToClipboard(plainText)
     }
@@ -351,6 +388,7 @@ final class ComposerInbox {
 
     private var pending: [String: String] = [:]
     private var replies: [String: ReplyDraft] = [:]
+    private var edits: [String: EditDraft] = [:]
 
     func deliver(_ text: String, to conversation: String) {
         pending[conversation, default: ""] += text
@@ -370,5 +408,14 @@ final class ComposerInbox {
 
     func takeReply(for conversation: String) -> ReplyDraft? {
         replies.removeValue(forKey: conversation)
+    }
+
+    func deliver(edit: EditDraft, to conversation: String) {
+        edits[conversation] = edit
+        deliveries += 1
+    }
+
+    func takeEdit(for conversation: String) -> EditDraft? {
+        edits.removeValue(forKey: conversation)
     }
 }

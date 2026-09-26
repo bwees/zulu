@@ -23,6 +23,11 @@ struct MacComposerBar: View {
     @State private var showingEmoji = false
     @State private var autocomplete: ComposeAutocompleteController?
     @State private var typingSender: TypingSender?
+    @State private var editMode: ComposerEditMode?
+
+    static let horizontalPadding: CGFloat = 12
+
+    private var isEditing: Bool { editMode?.isEditing == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -36,7 +41,11 @@ struct MacComposerBar: View {
                     Text("Uploading…").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let replyingTo { replyBanner(replyingTo) }
+            if isEditing {
+                editBanner
+            } else if let replyingTo {
+                replyBanner(replyingTo)
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
@@ -54,34 +63,30 @@ struct MacComposerBar: View {
                 field
 
                 Button {
-                    send()
+                    isEditing ? saveEdit() : send()
                 } label: {
-                    Image(systemName: "arrow.up")
+                    Image(systemName: isEditing ? "checkmark" : "arrow.up")
                         .font(.body.weight(.semibold))
                         .frame(width: 18, height: 18)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("Send  ⏎")
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editMode?.isSaving == true)
+                .help(isEditing ? "Save  ⏎" : "Send  ⏎")
                 .padding(.bottom, 2)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Self.horizontalPadding)
         .padding(.vertical, 8)
-        // Floats above the bar rather than sitting in it: in the bar, every suggestion
-        // list that opened or closed resized it and moved the conversation.
-        .overlay(alignment: .topLeading) {
-            if let autocomplete, autocomplete.isOpen {
-                MacAutocompleteBox(
-                    suggestions: autocomplete.suggestions,
-                    selectedIndex: autocomplete.selectedIndex
-                ) { accept($0) }
-                .padding(.horizontal, 12)
-                .alignmentGuide(.top) { $0[.bottom] }
-            }
+        // Drawn by the conversation, above everything in it. Drawn here, the history
+        // covered the part of the box that stuck out above the bar.
+        .anchorPreference(key: MacAutocompleteKey.self, value: .bounds) { bounds in
+            autocomplete.map { MacAutocompleteRequest(controller: $0, bounds: bounds, pick: accept) }
         }
         .task(id: source) {
             typingSender?.stop()
+            // What was being edited belongs to the conversation being left.
+            if isEditing { draft = "" }
+            editMode = ComposerEditMode(model: model)
             restoreDraft()
             typingSender = TypingSender { [model, source] op in await model.sendTyping(op, in: source) }
             EmojiCatalogueLoader.shared.start(store: model.storeForReading)
@@ -97,9 +102,9 @@ struct MacComposerBar: View {
         }
         .onChange(of: draft) {
             autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor)
-            model.saveDraft(draft, replyingTo: replyingTo, in: source)
+            saveDraft()
         }
-        .onChange(of: replyingTo) { model.saveDraft(draft, replyingTo: replyingTo, in: source) }
+        .onChange(of: replyingTo) { saveDraft() }
         .onDisappear { typingSender?.stop() }
         .onChange(of: cursor) { autocomplete?.update(draft: draft, cursorOffsetUTF16: cursor) }
         .onChange(of: ComposerInbox.shared.deliveries) { takeDelivery() }
@@ -182,10 +187,41 @@ struct MacComposerBar: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    private var editBanner: some View {
+        HStack(spacing: 8) {
+            Capsule().fill(Color.accentColor).frame(width: 3)
+            Label("Editing message", systemImage: "pencil")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+            Spacer(minLength: 0)
+            if editMode?.isSaving == true {
+                ProgressView().controlSize(.small)
+            }
+            Button {
+                cancelEdit()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Cancel edit  ⎋")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .padding(.vertical, 6)
+        .frame(height: 42)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
     // MARK: keys
 
     /// Return and Tab accept a suggestion when the box is open and otherwise fall
-    /// through; Escape closes whatever is open, the box first and then the reply.
+    /// through; Escape closes whatever is open, the box first, then an edit, then the
+    /// reply. Up in an empty composer edits your last message, as it does in Slack.
     private func handle(_ key: ComposerKey) -> Bool {
         let open = autocomplete?.isOpen == true
         switch key {
@@ -194,15 +230,19 @@ struct MacComposerBar: View {
                 accept(suggestion)
                 return true
             }
-            send()
+            isEditing ? saveEdit() : send()
             return true
         case .tab:
             guard open, let suggestion = autocomplete?.selectedSuggestion else { return false }
             accept(suggestion)
             return true
         case .up:
-            guard open else { return false }
-            autocomplete?.moveSelection(by: -1)
+            if open {
+                autocomplete?.moveSelection(by: -1)
+                return true
+            }
+            guard draft.isEmpty, !isEditing else { return false }
+            Task { await model.beginEditingLatestMessage(in: source) }
             return true
         case .down:
             guard open else { return false }
@@ -213,6 +253,10 @@ struct MacComposerBar: View {
                 autocomplete?.dismiss()
                 return true
             }
+            if isEditing {
+                cancelEdit()
+                return true
+            }
             if replyingTo != nil {
                 withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
                 return true
@@ -221,8 +265,11 @@ struct MacComposerBar: View {
         }
     }
 
+    /// The cursor is moved along with the text. The text view does not report a cursor
+    /// it was told to move, and the box would reopen on the query at the old one.
     private func accept(_ suggestion: AutocompleteSuggestion) {
         guard let result = autocomplete?.complete(suggestion, in: draft) else { return }
+        cursor = result.cursorOffsetUTF16
         draft = result.text
         pendingCursor = result.cursorOffsetUTF16
         focusToken += 1
@@ -239,13 +286,17 @@ struct MacComposerBar: View {
            !previous.isWhitespace {
             insertion = " " + insertion
         }
+        cursor = offset + insertion.utf16.count
         draft.insert(contentsOf: insertion, at: index)
-        pendingCursor = offset + insertion.utf16.count
+        pendingCursor = cursor
         focusToken += 1
     }
 
     private func takeDelivery() {
         let key = ConversationKey.of(source)
+        if let edit = ComposerInbox.shared.takeEdit(for: key) {
+            beginEdit(edit)
+        }
         if let reply = ComposerInbox.shared.takeReply(for: key) {
             withAnimation(.snappy(duration: 0.24)) { replyingTo = reply }
             focusToken += 1
@@ -259,6 +310,52 @@ struct MacComposerBar: View {
         if !draft.isEmpty, !draft.hasSuffix("\n") { draft += "\n" }
         draft += text
         pendingCursor = draft.utf16.count
+    }
+
+    /// While editing, the draft on disk stays whatever was being typed before.
+    private func saveDraft() {
+        guard !isEditing else { return }
+        model.saveDraft(draft, replyingTo: replyingTo, in: source)
+    }
+
+    // MARK: editing
+
+    private func beginEdit(_ edit: EditDraft) {
+        editMode?.begin(edit, settingAside: draft, reply: replyingTo)
+        sendError = nil
+        autocomplete?.dismiss()
+        withAnimation(.snappy(duration: 0.2)) { replyingTo = nil }
+        replaceDraft(with: edit.original)
+    }
+
+    private func cancelEdit() {
+        guard let setAside = editMode?.cancel() else { return }
+        restore(setAside)
+    }
+
+    private func saveEdit() {
+        guard let editMode else { return }
+        Task {
+            switch await editMode.save(draft) {
+            case .success(let setAside):
+                sendError = nil
+                restore(setAside)
+            case .failure(let error):
+                sendError = error.message
+            }
+        }
+    }
+
+    private func restore(_ setAside: ComposerEditMode.SetAside) {
+        withAnimation(.snappy(duration: 0.2)) { replyingTo = setAside.reply }
+        replaceDraft(with: setAside.text)
+    }
+
+    private func replaceDraft(with text: String) {
+        cursor = text.utf16.count
+        draft = text
+        pendingCursor = cursor
+        focusToken += 1
     }
 
     /// Only into an empty composer, so coming back to the conversation never replaces
@@ -314,6 +411,45 @@ struct MacComposerBar: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         return formatter.string(from: .now)
+    }
+}
+
+/// What the conversation needs to draw the composer's suggestion box over itself.
+struct MacAutocompleteRequest {
+    let controller: ComposeAutocompleteController
+    /// The compose bar's, so the box can sit on top of it.
+    let bounds: Anchor<CGRect>
+    let pick: (AutocompleteSuggestion) -> Void
+}
+
+struct MacAutocompleteKey: PreferenceKey {
+    static var defaultValue: MacAutocompleteRequest? { nil }
+
+    static func reduce(value: inout MacAutocompleteRequest?, nextValue: () -> MacAutocompleteRequest?) {
+        value = nextValue() ?? value
+    }
+}
+
+extension View {
+    /// Hosts the suggestion box of a composer somewhere inside this view.
+    func macAutocompleteBox() -> some View {
+        overlayPreferenceValue(MacAutocompleteKey.self) { request in
+            if let request {
+                GeometryReader { proxy in
+                    let bar = proxy[request.bounds]
+                    if request.controller.isOpen {
+                        MacAutocompleteBox(
+                            suggestions: request.controller.suggestions,
+                            selectedIndex: request.controller.selectedIndex,
+                            pick: request.pick
+                        )
+                        .padding(.horizontal, MacComposerBar.horizontalPadding)
+                        .frame(width: bar.width, height: bar.minY, alignment: .bottomLeading)
+                        .offset(x: bar.minX)
+                    }
+                }
+            }
+        }
     }
 }
 

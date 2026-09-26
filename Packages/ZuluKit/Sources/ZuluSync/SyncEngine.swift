@@ -190,9 +190,9 @@ public actor SyncEngine {
             try store.setRead(ids: messageIDs, read: operation == "add")
             if operation == "add" { try store.clearUnread(ids: messageIDs) }
 
-        case .updateMessage(let id, let renderedContent):
+        case .updateMessage(let id, let renderedContent, let editedAt):
             if let renderedContent {
-                try store.updateRenderedContent(id: id, html: renderedContent)
+                try store.updateRenderedContent(id: id, html: renderedContent, editedAt: editedAt)
             }
 
         case .reaction(let added, let messageID, let reaction):

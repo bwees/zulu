@@ -189,11 +189,35 @@ extension ZuluStore {
         }
     }
 
-    public func updateRenderedContent(id: Int, html: String) throws {
+    public func updateRenderedContent(id: Int, html: String, editedAt: Int? = nil) throws {
         try writer.write { db in
+            var assignments = [Column("renderedContent").set(to: html)]
+            if let editedAt { assignments.append(Column("editedAt").set(to: editedAt)) }
             try MessageRecord
                 .filter(Column("id") == id)
-                .updateAll(db, Column("renderedContent").set(to: html))
+                .updateAll(db, assignments)
+        }
+    }
+
+    /// What pressing up in an empty composer edits. Polls are left out: their text is
+    /// the `/poll` command, and editing it does not change the poll.
+    public func latestMessage(from senderID: Int, channelID: Int, topic: String) throws -> MessageRecord? {
+        try writer.read { db in
+            try MessageRecord
+                .filter(Column("senderID") == senderID && !Column("isWidget"))
+                .filter(Column("channelID") == channelID && Column("topic") == topic)
+                .order(Column("id").desc)
+                .fetchOne(db)
+        }
+    }
+
+    public func latestMessage(from senderID: Int, dmKey: String) throws -> MessageRecord? {
+        try writer.read { db in
+            try MessageRecord
+                .filter(Column("senderID") == senderID && !Column("isWidget"))
+                .filter(Column("dmKey") == dmKey)
+                .order(Column("id").desc)
+                .fetchOne(db)
         }
     }
 

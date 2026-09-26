@@ -45,14 +45,15 @@ struct TypingEventTests {
     @Test func aTopicMoveStillDecodes() throws {
         let event = try decode("""
             {"type": "update_message", "id": 5, "message_id": 42, "topic": "renamed",
-             "rendered_content": "<p>hi</p>"}
+             "rendered_content": "<p>hi</p>", "edit_timestamp": 1700000000}
             """)
 
-        guard case .updateMessage(let id, _) = event else {
+        guard case .updateMessage(let id, _, let editedAt) = event else {
             Issue.record("decoded as \(event.eventType)")
             return
         }
         #expect(id == 42)
+        #expect(editedAt == 1700000000)
     }
 }
 

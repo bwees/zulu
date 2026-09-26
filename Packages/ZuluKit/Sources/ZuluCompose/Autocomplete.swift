@@ -21,8 +21,10 @@ public struct ComposeContext: Sendable, Equatable {
 public struct AutocompleteSuggestion: Sendable, Equatable, Identifiable {
     public enum Icon: Sendable, Equatable {
         case glyph(String)
-        /// Realm-relative or absolute image path, for custom emoji and avatars.
+        /// Realm-relative or absolute image path, drawn as it is. Custom emoji use this.
         case image(String)
+        /// The same, cropped to a circle.
+        case avatar(String)
         case symbol(String)
     }
 

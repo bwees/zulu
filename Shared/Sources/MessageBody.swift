@@ -5,6 +5,7 @@ import ZuluMarkup
 struct MessageBody: View {
     let html: String
     private let blocks: [MessageBlock]
+    private let emojiOnly: Bool
     @Environment(AppModel.self) private var model
 
     /// Realm custom emoji are images. They are loaded first so the text can be built with
@@ -21,7 +22,9 @@ struct MessageBody: View {
         self.html = html
         let blocks = ParsedMessages.blocks(from: html)
         self.blocks = blocks
-        let height = Platform.bodyLine.height
+        let emojiOnly = MessageMarkup.isEmojiOnly(blocks)
+        self.emojiOnly = emojiOnly
+        let height = Self.line(emojiOnly: emojiOnly).height
         var cached: [String: EmojiFrames] = [:]
         for url in Self.emojiURLs(in: blocks) {
             cached[url] = DecodedImages.emoji(at: url, height: height)
@@ -49,15 +52,19 @@ struct MessageBody: View {
     private func stack(at time: TimeInterval) -> some View {
         VStack(alignment: .leading, spacing: Self.blockSpacing) {
             ForEach(blocks) { block in
-                BlockView(block: block, emoji: emoji, time: time)
+                BlockView(block: block, emoji: emoji, time: time, emojiOnly: emojiOnly)
             }
         }
+    }
+
+    static func line(emojiOnly: Bool) -> (height: CGFloat, descender: CGFloat) {
+        emojiOnly ? Platform.emojiOnlyLine : Platform.bodyLine
     }
 
     /// Custom emoji arrive at whatever size they were uploaded at — often hundreds of
     /// pixels. `Text` uses an image's intrinsic size, so they are scaled to the line.
     private func loadEmoji() async {
-        let height = Platform.bodyLine.height
+        let height = Self.line(emojiOnly: emojiOnly).height
         for url in Self.emojiURLs(in: blocks) where emoji[url] == nil {
             guard let data = await model.imageData(at: url),
                   let frames = EmojiFrames.decode(data, height: height)
@@ -87,11 +94,13 @@ struct BlockView: View {
     let emoji: [String: EmojiFrames]
     /// Which moment of an animated emoji to draw. Constant for messages that have none.
     var time: TimeInterval = 0
+    var emojiOnly = false
 
     var body: some View {
         switch block {
         case .paragraph(let spans):
             styled(spans)
+                .font(emojiOnly ? .largeTitle : nil)
                 .linkPointer()
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,7 +167,8 @@ struct BlockView: View {
         spans.reduce(Text("")) { result, span in
             if let url = span.emojiURL {
                 if let frames = emoji[url] {
-                    return result + Text(frames.frame(at: time)).baselineOffset(Platform.bodyLine.descender)
+                    return result + Text(frames.frame(at: time))
+                        .baselineOffset(MessageBody.line(emojiOnly: emojiOnly).descender)
                 }
                 return result + Text(span.text).foregroundColor(.secondary)
             }

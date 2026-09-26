@@ -33,6 +33,14 @@ extension ZulipClient {
         let response: Response = try await send(.get, "messages/\(id)")
         return response.raw_content
     }
+
+    public func editMessage(_ id: Int, content: String) async throws {
+        _ = try await raw(.patch, "messages/\(id)", parameters: ["content": content])
+    }
+
+    public func deleteMessage(_ id: Int) async throws {
+        _ = try await raw(.delete, "messages/\(id)")
+    }
 }
 
 extension ZulipError {
