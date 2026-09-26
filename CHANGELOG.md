@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/slop-place/zulu/compare/zulu-v1.5.2...zulu-v1.6.0) (2026-09-26)
+
+
+### Features
+
+* edit and delete messages, large emoji-only messages ([8e30790](https://github.com/slop-place/zulu/commit/8e3079023083a7fc0d88df27cf00f79b5ff64664))
+* image viewer ([4b35d7d](https://github.com/slop-place/zulu/commit/4b35d7d2ea9554b3b84dcc8de467c469a314cf5d))
+
 ## [1.5.2](https://github.com/slop-place/zulu/compare/zulu-v1.5.1...zulu-v1.5.2) (2026-09-25)
 
 
